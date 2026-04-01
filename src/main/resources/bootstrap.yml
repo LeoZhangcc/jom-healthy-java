@@ -1,0 +1,11 @@
+server:
+  port: 12210
+spring:
+  application:
+    name: Air-quality-monitoring-system
+  main:
+    allow-bean-definition-overriding: true
+  thymeleaf:
+    cache: false
+  profiles:
+    active: dev
