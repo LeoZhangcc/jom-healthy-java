@@ -9,7 +9,7 @@ import lombok.Data;
 import java.io.Serializable;
 
 @Data
-@TableName("Untitled") // 如果你改了表名，请在这里替换为实际表名
+@TableName("food") // 如果你改了表名，请在这里替换为实际表名
 public class FoodNutrition implements Serializable {
 
     private static final long serialVersionUID = 1L;

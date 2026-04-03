@@ -25,6 +25,7 @@
         <swagger.version>2.9.2</swagger.version>
         <swagger.annotations.version>1.5.22</swagger.annotations.version>
         <aspectj.version>1.9.1</aspectj.version>
+        <cdimascio.version>2.2.3</cdimascio.version>
     </properties>
 
     <dependencies>
@@ -49,6 +50,12 @@
             <artifactId>junit-jupiter</artifactId>
             <version>RELEASE</version>
             <scope>compile</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>io.github.cdimascio</groupId>
+            <artifactId>dotenv-java</artifactId>
+            <version>${cdimascio.version}</version>
         </dependency>
 
         <!--hutool工具类-->

@@ -5,8 +5,12 @@ import com.jom.healthy.entity.FoodNutrition;
 import com.jom.healthy.model.params.FoodNutritionParam;
 import com.jom.healthy.util.response.ResponseData;
 
+import java.util.List;
+
 public interface FoodNutritionService extends IService<FoodNutrition> {
 
-    ResponseData addFood(FoodNutritionParam param);
+    void addFood(FoodNutritionParam param);
+
+    List<FoodNutrition> queryFood(String name);
 
 }
