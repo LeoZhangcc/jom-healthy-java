@@ -1,0 +1,61 @@
+import request from '@/router/axios';
+
+export const getList = (page, size, params) => {
+  return request({
+    url: '/api/${lowerEntity}/list',
+    method: 'post',
+    params: {
+      ...params,
+      page,
+      size,
+    }
+  })
+}
+export const remove = (id) => {
+  return request({
+    url: '/api/${lowerEntity}/delete',
+    method: 'post',
+    meta: {
+      isSerialize: true,
+    },
+    data: {
+      id,
+    }
+  })
+}
+
+export const add = (row) => {
+  return request({
+    url: '/api/${lowerEntity}/add',
+    method: 'post',
+    meta: {
+      isSerialize: true,
+    },
+    data: row
+  })
+}
+
+export const update = (row) => {
+  return request({
+    url: '/api/${lowerEntity}/edit',
+    method: 'post',
+    meta: {
+      isSerialize: true,
+    },
+    data: row
+  })
+}
+
+export const changeStatus = (userId, status) => {
+  return request({
+    url: '/api/${lowerEntity}/changeStatus',
+    method: 'post',
+    meta: {
+      isSerialize: true,
+    },
+    data: {
+      userId,
+      status
+    }
+  })
+}

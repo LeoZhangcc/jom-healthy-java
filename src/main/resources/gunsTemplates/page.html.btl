@@ -1,0 +1,167 @@
+<template>
+  <basic-container>
+    <avue-crud :option="option"
+               :data="data"
+               ref="crud"
+               v-model="form"
+               :table-loading="loading"
+               :permission="permissionList"
+               @row-del="rowDel"
+               @row-update="rowUpdate"
+               @row-save="rowSave"
+               :page="page"
+               @refresh-change="refreshChange"
+               @search-change="searchChange"
+               @search-reset="searchReset"
+               @current-change="currentChange"
+               @size-change="sizeChange"
+               @on-load="onLoad">
+    </avue-crud>
+  </basic-container>
+</template>
+
+<script>
+import {
+  getList,
+  remove,
+  update,
+  add
+} from "@/api/${lowerEntity}/${lowerEntity}";
+import { mapGetters } from "vuex";
+
+export default {
+  data () {
+    return {
+      form: {},
+      query: {},
+      loading: true,
+      rolesTree: [],
+      rolesKeys: [],
+      box: false,
+      page: {
+        pageSize: 10,
+        currentPage: 1,
+        total: 0
+      },
+      option: {
+        size: 'mini',
+        excelBtn: true,
+        tip: false,
+        border: true,
+        index: true,
+        selection: true,
+        viewBtn: true,
+        rowKey: '${keyPropertyName}',
+        height: 'auto',
+        calcHeight: 380,
+        dialogType: 'dialog',
+        menuWidth: 300,
+        column: [
+            <% for(var i=0 ; i < fieldsNoKey.~size ; i++){ %>
+          {
+            label: "${fieldsNoKey[i].comment}",
+            prop: "${fieldsNoKey[i].propertyName}",
+            fixed: true,
+            rules: [{
+              required: true,
+              message: "请输入${fieldsNoKey[i].comment}",
+              trigger: "blur"
+            }]
+          },
+            <% } %>
+        ]
+      },
+      data: []
+    };
+  },
+  computed: {
+    ...mapGetters(["permission", 'userInfo']),
+    permissionList () {
+      return {
+        addBtn: this.vaildData(this.permission.mgr_add, false),
+        viewBtn: this.vaildData(this.permission.mgr_view, false),
+        delBtn: this.vaildData(this.permission.mgr_delete, false),
+        editBtn: this.vaildData(this.permission.mgr_edit, false)
+      };
+    },
+  },
+  methods: {
+    rowSave (row, loading, done) {
+      row.position = row.positionIds;
+      row.deptName = row.$deptId;
+      row.repassword = row.password;
+      add(row).then(() => {
+        loading();
+        this.onLoad(this.page);
+        this.$message({
+          type: "success",
+          message: "操作成功!"
+        });
+      }, error => {
+        done();
+        console.log(error);
+      });
+    },
+    rowUpdate (row, index, loading, done) {
+      row.position = row.positionIds;
+      update(row).then(() => {
+        loading();
+        this.onLoad(this.page);
+        this.$message({
+          type: "success",
+          message: "操作成功!"
+        });
+      }, error => {
+        done();
+        console.log(error);
+      });
+    },
+    rowDel (row) {
+      this.$confirm("确定将选择数据删除?", {
+        confirmButtonText: "确定",
+        cancelButtonText: "取消",
+        type: "warning"
+      })
+        .then(() => {
+          return remove(row.${keyPropertyName});
+        })
+        .then(() => {
+          this.onLoad(this.page);
+          this.$message({
+            type: "success",
+            message: "操作成功!"
+          });
+        });
+    },
+    searchReset () {
+      this.query = {};
+      this.onLoad(this.page);
+    },
+    searchChange (params) {
+      this.query = params;
+      this.onLoad(this.page, params);
+    },
+    currentChange (currentPage) {
+      this.page.currentPage = currentPage;
+    },
+    sizeChange (pageSize) {
+      this.page.pageSize = pageSize;
+    },
+    refreshChange () {
+      this.onLoad(this.page);
+    },
+    onLoad (page, params = {}) {
+      this.loading = true;
+      getList(page.currentPage, page.pageSize, Object.assign(params, this.query)).then(res => {
+        this.loading = false;
+        const data = res.data;
+        this.page.total = data.count;
+        this.data = data.data;
+      });
+    }
+  }
+};
+</script>
+
+<style>
+</style>
