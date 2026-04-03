@@ -24,4 +24,10 @@ public class FoodNutritionController {
         return ResponseData.success(foodNutritionService.queryFood(name));
     }
 
+    @ApiOperation("更新名称")
+    @PostMapping("/updateName")
+    public void updateName() {
+        foodNutritionService.updateName();
+    }
+
 }
