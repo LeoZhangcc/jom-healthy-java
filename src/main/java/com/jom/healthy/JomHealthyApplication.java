@@ -8,10 +8,10 @@ import springfox.documentation.swagger2.annotations.EnableSwagger2;
 @EnableSwagger2
 // 表示通过aop框架暴露该代理对象,AopContext能够访问
 //@EnableAspectJAutoProxy(exposeProxy = true)
-public class Application {
+public class JomHealthyApplication {
 
 	public static void main(String[] args) {
-		SpringApplication.run(Application.class, args);
+		SpringApplication.run(JomHealthyApplication.class, args);
 	}
 
 }
