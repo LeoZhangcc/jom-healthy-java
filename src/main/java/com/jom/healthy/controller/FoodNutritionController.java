@@ -8,7 +8,8 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
 
-@RestController(value = "/food")
+@RestController
+@RequestMapping("/food")
 @Api(value = "食品接口",tags = {"食品增删改查"})
 public class FoodNutritionController {
 
