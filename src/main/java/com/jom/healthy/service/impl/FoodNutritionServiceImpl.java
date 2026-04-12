@@ -34,7 +34,7 @@ public class FoodNutritionServiceImpl extends ServiceImpl<FoodNutritionMapper, F
     @Override
     public List<FoodNutrition> queryFood(String name) {
         QueryWrapper<FoodNutrition> queryWrapper = new QueryWrapper<>();
-        queryWrapper.like("food_name_original", name);
+        queryWrapper.like("food_name_combine", name);
         List<FoodNutrition> foodNutritions = this.baseMapper.selectList(queryWrapper);
 
         return foodNutritions;
@@ -59,28 +59,12 @@ public class FoodNutritionServiceImpl extends ServiceImpl<FoodNutritionMapper, F
         List<FoodNutrition> list = this.baseMapper.selectList(null);
 
         for (FoodNutrition food : list) {
-            String original = food.getFoodNameOriginal();
-            if (original == null || original.isEmpty()) continue;
 
-            // 2. 正则解析：匹配 "英文名 (马来文名) 学名"
-            // 结果：group(1)是英文，group(2)是马来文
-            Pattern pattern = Pattern.compile("^(.*?)\\s*\\((.*?)\\)");
-            Matcher matcher = pattern.matcher(original);
-
-            if (matcher.find()) {
-                String enName = matcher.group(1).trim();
-                String msName = matcher.group(2).trim();
-
-                food.setFoodNameEn(enName);
-                food.setFoodNameMs(msName);
-
-                // 3. 翻译逻辑（见第二阶段）
-                // String cnName = translateToCn(enName);
-                // food.setFoodNameCn(cnName);
-
-                // 4. 更新数据库
-                this.baseMapper.updateById(food);
-            }
+            String foodNameCn = food.getFoodNameCn();
+            String foodNameEn = food.getFoodNameEn();
+            String foodNameMs = food.getFoodNameMs();
+            food.setFoodNameCombine(foodNameCn+","+foodNameEn+","+foodNameMs);
+            this.baseMapper.updateById(food);
         }
     }
 
