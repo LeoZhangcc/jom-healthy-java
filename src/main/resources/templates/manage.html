@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JomHealthy | 图片管理系统</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    :root { --primary-color: #2c3e50; }
+    body { background-color: #f8f9fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    .navbar { background-color: var(--primary-color) !important; box-shadow: 0 2px 4px rgba(0,0,0,.1); }
+    .main-card { border: none; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,.05); }
+    .pic-preview-sm { width: 70px; height: 70px; border-radius: 8px; object-fit: cover; border: 1px solid #eee; background: #fff; }
+    .url-text { font-family: 'Courier New', Courier, monospace; font-size: 0.8rem; color: #666; max-width: 250px; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .preview-container { width: 100%; height: 220px; border: 2px dashed #ddd; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: #fdfdfd; position: relative; overflow: hidden; }
+    #preViewImg { max-width: 100%; max-height: 100%; object-fit: contain; }
+  </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark mb-4">
+  <div class="container">
+    <span class="navbar-brand mb-0 h1">JomHealthy Admin</span>
+    <div class="d-flex align-items-center">
+      <span class="text-light me-3 small">Admin: <strong th:text="${session.user}"></strong></span>
+      <a href="/" class="btn btn-sm btn-outline-light">退出登录</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container pb-5">
+  <div class="card main-card mb-4">
+    <div class="card-body p-4">
+      <form action="/manage" method="get" id="searchForm" class="row g-3">
+        <div class="col-md-10">
+          <div class="input-group">
+            <span class="input-group-text bg-white border-end-0"><i class="bi bi-search"></i></span>
+            <input type="text" name="name" class="form-control border-start-0 ps-0"
+                   placeholder="输入搜索食物名称 (中文或英文)..." th:value="${param.name}">
+          </div>
+        </div>
+        <div class="col-md-2">
+          <button type="submit" class="btn btn-primary w-100 fw-bold">查询数据</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card main-card">
+    <div class="card-header bg-white py-3 border-bottom-0">
+      <h5 class="mb-0 text-dark fw-bold">食物清单与图片管理</h5>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="bg-light text-muted small text-uppercase">
+        <tr>
+          <th class="ps-4" style="width: 80px;">ID</th>
+          <th style="width: 100px;">图片预览</th>
+          <th>食物名称 (CN / EN)</th>
+          <th>当前 URL</th>
+          <th class="text-center pe-4" style="width: 150px;">操作</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:each="f : ${foods}">
+          <td class="ps-4 fw-bold text-muted" th:text="${f.id}"></td>
+          <td>
+            <img th:src="${f.picUrl}" class="pic-preview-sm"
+                 >
+          </td>
+          <td>
+            <div class="fw-bold text-dark" th:text="${f.foodNameCn}"></div>
+            <div class="text-muted small" th:text="${f.foodNameEn}"></div>
+          </td>
+          <td>
+            <span class="url-text" th:text="${f.picUrl ?: '未设置 URL'}"></span>
+          </td>
+          <td class="text-center pe-4">
+            <button class="btn btn-outline-primary btn-sm px-3"
+                    th:onclick="openEditModal([[${f.id}]], [[${f.foodNameCn}]], [[${f.picUrl}]])">
+              修改图片 URL
+            </button>
+          </td>
+        </tr>
+        <tr th:if="${#lists.isEmpty(foods)}">
+          <td colspan="5" class="text-center py-5 text-muted">未查询到相关食物数据</td>
+        </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="picModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content shadow-lg border-0">
+      <div class="modal-header border-0">
+        <h5 class="modal-title fw-bold">更换图片 - <span id="titleName" class="text-primary"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label small fw-bold text-secondary">新的图片地址 (HTTP/HTTPS)</label>
+          <textarea id="newUrlInput" class="form-control form-control-sm" rows="4"
+                    placeholder="在此处粘贴完整链接..."></textarea>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <label class="form-label small fw-bold text-secondary mb-0">图片预览</label>
+          <button class="btn btn-link btn-sm p-0 text-decoration-none" onclick="manualPreview()">预览此链接</button>
+        </div>
+
+        <div class="preview-container">
+          <img id="preViewImg">
+        </div>
+      </div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary px-4 fw-bold" onclick="submitChange()">确认保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script th:inline="javascript">
+  const picModal = new bootstrap.Modal(document.getElementById('picModal'));
+  let currentId = null;
+
+  // 1. 打开弹窗：只在此时设置一次预览图（显示数据库现有的图）
+  function openEditModal(id, name, url) {
+    currentId = id;
+    document.getElementById('titleName').innerText = name;
+    document.getElementById('newUrlInput').value = url || '';
+    document.getElementById('preViewImg').src = url || 'https://via.placeholder.com/200?text=No+Image';
+    picModal.show();
+  }
+
+  // 2. 手动预览函数：只有点击“预览此链接”文字时才更新 src
+  function manualPreview() {
+    const url = document.getElementById('newUrlInput').value.trim();
+    if (url) {
+      document.getElementById('preViewImg').src = url;
+    } else {
+      alert("请输入 URL 后再预览");
+    }
+  }
+
+  // 3. 提交修改
+  function submitChange() {
+    const urlValue = document.getElementById('newUrlInput').value.trim();
+    if (!currentId) return;
+
+    const params = new URLSearchParams();
+    params.append('id', currentId);
+    params.append('picUrl', urlValue);
+
+    fetch('/modify', {
+      method: 'POST',
+      body: params
+    })
+            .then(response => response.text())
+            .then(result => {
+              if (result === 'success') {
+                alert('图片已更新！');
+                location.reload(); // 提交成功后才刷新列表展示新图
+              } else {
+                alert('更新失败，后端返回错误。');
+              }
+            })
+            .catch(err => {
+              console.error(err);
+              alert('网络异常，无法提交。');
+            });
+  }
+</script>
+</body>
+</html>
