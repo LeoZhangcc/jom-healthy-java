@@ -47,6 +47,13 @@ public class FoodNutritionServiceImpl extends ServiceImpl<FoodNutritionMapper, F
     }
 
     @Override
+    public void heartBeatCheck() {
+        QueryWrapper<FoodNutrition> queryWrapper = new QueryWrapper<>();
+        queryWrapper.like("food_name_original", "beef");
+        this.baseMapper.selectList(queryWrapper);
+    }
+
+    @Override
     public void updateName() {
         // 1. 获取所有原始数据
         List<FoodNutrition> list = this.baseMapper.selectList(null);
