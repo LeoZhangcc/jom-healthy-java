@@ -23,7 +23,7 @@ public class FoodTransationaServiceImpl implements FoodTransationaService {
 
     private final String apiKey = "";
 
-    private final String GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview:generateContent?key=";
+    private final String GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=";
 
     @Resource
     private FoodNutritionService foodService; // MyBatis-Plus Service
@@ -31,52 +31,50 @@ public class FoodTransationaServiceImpl implements FoodTransationaService {
     private final RestTemplate restTemplate = new RestTemplate();
 
 
-    public void executeBatchTranslation() {
-        // 1. 找出所有需要翻译的记录 (CN 字段为空)
+    public void executeBatchTranslation(Integer id, Integer size) {
+// 1. 查询前 200 条：只要 en/cn/ms 其中一个为空，就查出来
         List<FoodNutrition> targetList = foodService.list(
-                new LambdaQueryWrapper<FoodNutrition>().isNull(FoodNutrition::getFoodNameCn)
+                new LambdaQueryWrapper<FoodNutrition>()
+                        .isNotNull(FoodNutrition::getFoodNameOriginal)
+                        .gt(FoodNutrition::getId, id)
+                        .last("limit " + size) // 锁定 200 条
         );
 
-        if (targetList.isEmpty()) return;
-
-        // 2. 分批处理（例如每 30 个食物调用一次 API，防止 Prompt 过长或触发限制）
-        int batchSize = 30;
-        for (int i = 0; i < targetList.size(); i += batchSize) {
-            List<FoodNutrition> currentBatch = targetList.subList(i, Math.min(i + batchSize, targetList.size()));
-
-            // 提取英文名列表
-            List<String> enNames = currentBatch.stream()
-                    .map(FoodNutrition::getFoodNameEn)
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toList());
-
-            if (enNames.isEmpty()) continue;
-
-            // 3. 调用 Gemini API
-            Map<String, String> translationMap = callGeminiApi(enNames);
-
-            // 4. 将翻译结果回填到对象中
-            for (FoodNutrition food : currentBatch) {
-                String cnName = translationMap.get(food.getFoodNameEn());
-                if (cnName != null) {
-                    food.setFoodNameCn(cnName);
-                }
-            }
-
-            // 5. MyBatis-Plus 批量更新数据库
-            foodService.updateBatchById(currentBatch);
-
-            System.out.println("已完成批次: " + (i / batchSize + 1));
-
-            // 免费版 API 建议增加延迟，防止触发 15 RPM 限制
-            try { Thread.sleep(15000); } catch (InterruptedException e) { e.printStackTrace(); }
+        if (targetList.isEmpty()) {
+            log.info("没有需要翻译的数据。");
+            return;
         }
+
+        // 2. 提取原始名称列表
+        List<String> originalNames = targetList.stream()
+                .map(FoodNutrition::getFoodNameOriginal)
+                .distinct()
+                .collect(Collectors.toList());
+
+        // 3. 调用 Gemini (一次性翻译所有语言)
+        Map<String, JSONObject> translationMap = callGeminiApiForTriple(originalNames);
+
+        // 4. 数据回填
+        for (FoodNutrition food : targetList) {
+            JSONObject trans = translationMap.get(food.getFoodNameOriginal());
+            if (trans != null) {
+                if (trans.containsKey("en")) food.setFoodNameEn(trans.getString("en"));
+                if (trans.containsKey("cn")) food.setFoodNameCn(trans.getString("cn"));
+                if (trans.containsKey("ms")) food.setFoodNameMs(trans.getString("ms"));
+            }
+        }
+
+        // 5. 批量更新到数据库
+        foodService.updateBatchById(targetList);
+        log.info("成功处理并更新 {} 条食物数据", targetList.size());
     }
 
-    private Map<String, String> callGeminiApi(List<String> names) {
-        String prompt = "你是一个营养学专家。请将以下食物英文名翻译成中文，以JSON格式返回(Key为英文，Value为中文翻译)，不要输出多余文字：" + names.toString();
+    private Map<String, JSONObject> callGeminiApiForTriple(List<String> names) {
+        // 极简 Prompt 节省 Token
+        String prompt = "Role: Nutrition Expert. Task: Translate the following food names into English (en), Chinese (cn), and Malay (ms). " +
+                "Format: JSON object where Key is the original name, Value is {en:\"\", cn:\"\", ms:\"\"}. " +
+                "No extra text. Data: " + JSON.toJSONString(names);
 
-        // 构造请求体 (根据 Gemini API 标准格式)
         Map<String, Object> requestBody = ImmutableMap.of(
                 "contents", ImmutableList.of(
                         ImmutableMap.of("parts", ImmutableList.of(ImmutableMap.of("text", prompt)))
@@ -85,22 +83,29 @@ public class FoodTransationaServiceImpl implements FoodTransationaService {
 
         try {
             String responseStr = restTemplate.postForObject(GEMINI_URL + apiKey, requestBody, String.class);
+            JSONObject jsonResponse = JSON.parseObject(responseStr);
 
-            // 解析 Gemini 返回的嵌套 JSON 字符串
-            JSONObject jsonObject = JSON.parseObject(responseStr);
-            String aiText = jsonObject.getJSONArray("candidates")
+            // 提取 AI 文本内容
+            String aiText = jsonResponse.getJSONArray("candidates")
                     .getJSONObject(0)
                     .getJSONObject("content")
                     .getJSONArray("parts")
                     .getJSONObject(0)
                     .getString("text");
 
-            // 去掉 AI 可能自带的 ```json 标记
-            aiText = aiText.replace("```json", "").replace("```", "").trim();
+            // 清理 Markdown 标签
+            aiText = aiText.replaceAll("```json|```", "").trim();
 
-            return JSON.parseObject(aiText, Map.class);
+            // 解析结果映射
+            JSONObject resultMap = JSON.parseObject(aiText);
+            Map<String, JSONObject> finalMap = new HashMap<>();
+            for (String key : resultMap.keySet()) {
+                finalMap.put(key, resultMap.getJSONObject(key));
+            }
+            return finalMap;
+
         } catch (Exception e) {
-            System.err.println("API 调用失败: " + e.getMessage());
+            log.error("Gemini API 调用异常: {}", e.getMessage());
             return Collections.emptyMap();
         }
     }

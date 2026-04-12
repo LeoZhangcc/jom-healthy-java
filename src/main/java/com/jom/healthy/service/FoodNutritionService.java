@@ -13,6 +13,8 @@ public interface FoodNutritionService extends IService<FoodNutrition> {
 
     List<FoodNutrition> queryFood(String name);
 
+    void heartBeatCheck();
+
     void updateName();
 
 }
