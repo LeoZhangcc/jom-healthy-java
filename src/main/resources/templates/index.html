@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JomHealthy - The Smart Eating Program for Children</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* 保持原有代码中的一些自定义选中颜色配置 */
+        ::selection {
+            background-color: #a7f3d0; /* emerald-200 */
+            color: #064e3b; /* emerald-900 */
+        }
+        /* 接口请求完成前的加载状态（可选，增加用户体验） */
+        .loading-link {
+            cursor: wait;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-white font-sans text-gray-900">
+
+<header class="fixed top-0 w-full bg-white/95 backdrop-blur-sm z-50 border-b border-gray-100 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between items-center h-20">
+            <div class="flex-shrink-0 flex items-center gap-2">
+                <div class="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg">
+                    J
+                </div>
+                <span class="font-bold text-2xl text-gray-900 tracking-tight">
+                        Jom<span class="text-emerald-500">Healthy</span>
+                    </span>
+            </div>
+
+            <nav class="hidden md:flex space-x-8">
+                <a href="#about" class="text-gray-600 hover:text-emerald-500 font-medium transition-colors">About</a>
+                <a href="#features" class="text-gray-600 hover:text-emerald-500 font-medium transition-colors">Features</a>
+                <a href="#download" class="text-gray-600 hover:text-emerald-500 font-medium transition-colors">Download</a>
+            </nav>
+
+            <div class="hidden md:flex items-center">
+                <a href="javascript:void(0)" target="_blank" rel="noopener noreferrer" class="download-link bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-2.5 rounded-full font-medium transition-all shadow-md hover:shadow-lg flex items-center gap-2">
+                    <i data-lucide="download" class="w-4 h-4"></i>
+                    Get the App
+                </a>
+            </div>
+
+            <div class="md:hidden flex items-center">
+                <button id="mobile-menu-btn" class="text-gray-600 focus:outline-none">
+                    <i id="icon-menu" data-lucide="menu" class="w-6 h-6"></i>
+                    <i id="icon-x" data-lucide="x" class="w-6 h-6 hidden"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="mobile-menu" class="hidden md:hidden bg-white border-b border-gray-100 px-4 pt-2 pb-4 space-y-1 shadow-lg">
+        <a href="#about" class="mobile-link block px-3 py-2 text-base font-medium text-gray-700 hover:text-emerald-500 hover:bg-emerald-50 rounded-md">About</a>
+        <a href="#features" class="mobile-link block px-3 py-2 text-base font-medium text-gray-700 hover:text-emerald-500 hover:bg-emerald-50 rounded-md">Features</a>
+        <a href="javascript:void(0)" target="_blank" rel="noopener noreferrer" class="download-link mobile-link block px-3 py-2 text-base font-medium text-emerald-600 hover:bg-emerald-50 rounded-md">Download App</a>
+    </div>
+</header>
+
+<main>
+    <section class="relative pt-32 pb-20 lg:pt-40 lg:pb-28 overflow-hidden bg-gradient-to-br from-emerald-50 via-white to-emerald-50/50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-8 items-center">
+                <div class="max-w-2xl">
+                    <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-100 text-emerald-700 font-medium text-sm mb-6 border border-emerald-200 shadow-sm">
+                        <span class="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                        The Smart Eating Program for Children
+                    </div>
+                    <h1 class="text-4xl lg:text-6xl font-extrabold text-gray-900 leading-tight mb-6">
+                        Nurturing <span class="text-emerald-500">Healthy Kids</span> in Malaysia
+                    </h1>
+                    <p class="text-lg lg:text-xl text-gray-600 mb-8 leading-relaxed">
+                        Empower your family with practical nutrition guidance, AI-powered meal planning, and fun, child-friendly education designed for Malaysian children aged 7-12.
+                    </p>
+                    <div class="flex flex-col sm:flex-row gap-4">
+                        <a href="javascript:void(0)" target="_blank" rel="noopener noreferrer" class="download-link bg-emerald-500 hover:bg-emerald-600 text-white px-8 py-3.5 rounded-full font-semibold transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2 text-lg w-fit">
+                            <i data-lucide="download" class="w-5 h-5"></i>
+                            Download APK
+                        </a>
+                    </div>
+
+                    <div class="mt-10 flex items-center gap-4 text-sm text-gray-500">
+                        <div class="flex -space-x-2">
+                            <div class="w-8 h-8 rounded-full border-2 border-white bg-gray-200 flex items-center justify-center overflow-hidden">
+                                <img src="https://i.pravatar.cc/100?img=11" alt="User" />
+                            </div>
+                            <div class="w-8 h-8 rounded-full border-2 border-white bg-gray-200 flex items-center justify-center overflow-hidden">
+                                <img src="https://i.pravatar.cc/100?img=12" alt="User" />
+                            </div>
+                            <div class="w-8 h-8 rounded-full border-2 border-white bg-gray-200 flex items-center justify-center overflow-hidden">
+                                <img src="https://i.pravatar.cc/100?img=13" alt="User" />
+                            </div>
+                            <div class="w-8 h-8 rounded-full border-2 border-white bg-gray-200 flex items-center justify-center overflow-hidden">
+                                <img src="https://i.pravatar.cc/100?img=14" alt="User" />
+                            </div>
+                        </div>
+                        <p>Trusted by <span class="font-bold text-gray-800">10,000+</span> parents</p>
+                    </div>
+                </div>
+
+                <div class="relative mx-auto w-full max-w-md lg:max-w-none">
+                    <div class="absolute inset-0 bg-emerald-200 rounded-full blur-3xl opacity-30 animate-pulse"></div>
+                    <img
+                            src="https://images.unsplash.com/photo-1724491972300-eebbba003aff?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxhc2lhbiUyMGNoaWxkJTIwZWF0aW5nJTIwaGVhbHRoeSUyMGZvb2R8ZW58MXx8fHwxNzc2MDg5NzA3fDA&ixlib=rb-4.1.0&q=80&w=1080"
+                            alt="Asian child eating healthy food"
+                            class="relative rounded-3xl shadow-2xl border-4 border-white transform rotate-2 hover:rotate-0 transition-transform duration-500 object-cover h-[500px] w-full"
+                    />
+
+                    <div class="absolute -left-6 bottom-12 bg-white p-4 rounded-xl shadow-xl border border-gray-100 flex items-center gap-3 animate-bounce" style="animation-duration: 3s;">
+                        <div class="bg-green-100 p-2 rounded-lg text-green-600">
+                            <i data-lucide="activity" class="w-6 h-6"></i>
+                        </div>
+                        <div>
+                            <p class="text-xs text-gray-500 font-medium">BMI Status</p>
+                            <p class="text-sm font-bold text-gray-900">Healthy Range</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="about" class="py-20 bg-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+                <div class="order-2 lg:order-1 relative">
+                    <img
+                            src="https://images.unsplash.com/photo-1758874960716-3bf3dd7ac559?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwYXJlbnQlMjBhbmQlMjBjaGlsZCUyMGNvb2tpbmclMjBraXRjaGVufGVufDF8fHx8MTc3NjA4OTcwN3ww&ixlib=rb-4.1.0&q=80&w=1080"
+                            alt="Parent and child cooking"
+                            class="rounded-3xl shadow-xl object-cover h-[600px] w-full"
+                    />
+                    <div class="absolute -bottom-6 -right-6 w-32 h-32 bg-emerald-100 rounded-full blur-2xl -z-10"></div>
+                    <div class="absolute -top-6 -left-6 w-32 h-32 bg-orange-100 rounded-full blur-2xl -z-10"></div>
+                </div>
+                <div class="order-1 lg:order-2">
+                    <h2 class="text-3xl lg:text-4xl font-bold text-gray-900 mb-6">
+                        Why <span class="text-emerald-500">JomHealthy</span>?
+                    </h2>
+                    <p class="text-lg text-gray-600 mb-6 leading-relaxed">
+                        Malaysian families with children aged 7-12 are facing significant challenges with nutrition. With busy schedules and the prevalence of unhealthy snacks and fast food, it's hard to ensure your child gets the balanced diet they need for proper growth and development.
+                    </p>
+                    <p class="text-lg text-gray-600 mb-8 leading-relaxed">
+                        JomHealthy bridges the gap between complex nutritional data and everyday food choices. We provide accessible, trustworthy, and practical nutrition support for parents while making healthy eating fun and engaging for kids.
+                    </p>
+
+                    <div class="space-y-4">
+                        <div class="flex items-start gap-3">
+                            <i data-lucide="check-circle-2" class="w-6 h-6 text-emerald-500 flex-shrink-0 mt-0.5"></i>
+                            <span class="text-gray-700 font-medium">Understand your child's current nutritional and physical health</span>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <i data-lucide="check-circle-2" class="w-6 h-6 text-emerald-500 flex-shrink-0 mt-0.5"></i>
+                            <span class="text-gray-700 font-medium">Translate complex health data into practical daily food decisions</span>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <i data-lucide="check-circle-2" class="w-6 h-6 text-emerald-500 flex-shrink-0 mt-0.5"></i>
+                            <span class="text-gray-700 font-medium">Make learning about healthy foods fun and engaging for children</span>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <i data-lucide="check-circle-2" class="w-6 h-6 text-emerald-500 flex-shrink-0 mt-0.5"></i>
+                            <span class="text-gray-700 font-medium">Overcome language barriers with full trilingual support</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="features" class="py-20 bg-gray-50 border-t border-gray-100">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto mb-16">
+                <h2 class="text-sm font-bold text-emerald-500 tracking-wider uppercase mb-2">App Features</h2>
+                <h3 class="text-3xl lg:text-4xl font-extrabold text-gray-900 mb-4">
+                    Everything You Need for a Healthy Child
+                </h3>
+                <p class="text-lg text-gray-600">
+                    JomHealthy is packed with intuitive tools designed specifically for parents and children to build lasting, healthy habits together.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+                <div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-xl transition-all duration-300 group">
+                    <div class="w-14 h-14 bg-rose-100 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                        <i data-lucide="heart-pulse" class="w-6 h-6 text-rose-500"></i>
+                    </div>
+                    <h4 class="text-xl font-bold text-gray-900 mb-3">Social Health Insights</h4>
+                    <p class="text-gray-600 leading-relaxed text-sm">Access reliable health statistics based on MOH & WHO data, paired with quick daily nutrition tips.</p>
+                </div>
+
+                <div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-xl transition-all duration-300 group">
+                    <div class="w-14 h-14 bg-blue-100 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                        <i data-lucide="activity" class="w-6 h-6 text-blue-500"></i>
+                    </div>
+                    <h4 class="text-xl font-bold text-gray-900 mb-3">Body Condition Checker</h4>
+                    <p class="text-gray-600 leading-relaxed text-sm">Easily track your child's BMI and physical condition with color-coded results and actionable suggestions.</p>
+                </div>
+
+                <div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-xl transition-all duration-300 group">
+                    <div class="w-14 h-14 bg-emerald-100 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                        <i data-lucide="shopping-cart" class="w-6 h-6 text-emerald-500"></i>
+                    </div>
+                    <h4 class="text-xl font-bold text-gray-900 mb-3">AI Smart Meal Assistant</h4>
+                    <p class="text-gray-600 leading-relaxed text-sm">Generate healthy recipes, automatically create shopping lists, and navigate to nearby grocery stores.</p>
+                </div>
+
+                <div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-xl transition-all duration-300 group">
+                    <div class="w-14 h-14 bg-orange-100 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                        <i data-lucide="apple" class="w-6 h-6 text-orange-500"></i>
+                    </div>
+                    <h4 class="text-xl font-bold text-gray-900 mb-3">Kid-Friendly Explanations</h4>
+                    <p class="text-gray-600 leading-relaxed text-sm">Translate complex nutritional data into visual, relatable concepts like sugar cubes and color indicators.</p>
+                </div>
+
+                <div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-xl transition-all duration-300 group">
+                    <div class="w-14 h-14 bg-purple-100 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                        <i data-lucide="smile" class="w-6 h-6 text-purple-500"></i>
+                    </div>
+                    <h4 class="text-xl font-bold text-gray-900 mb-3">Interactive Pet System</h4>
+                    <p class="text-gray-600 leading-relaxed text-sm">A fun digital companion that reacts to food choices, making health education interactive for your child.</p>
+                </div>
+
+                <div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-xl transition-all duration-300 group">
+                    <div class="w-14 h-14 bg-indigo-100 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                        <i data-lucide="trending-up" class="w-6 h-6 text-indigo-500"></i>
+                    </div>
+                    <h4 class="text-xl font-bold text-gray-900 mb-3">Growth Milestone Analytics</h4>
+                    <p class="text-gray-600 leading-relaxed text-sm">Track and visualize height and weight data over time, with alerts for abnormal growth patterns.</p>
+                </div>
+
+                <div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-xl transition-all duration-300 group">
+                    <div class="w-14 h-14 bg-teal-100 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                        <i data-lucide="languages" class="w-6 h-6 text-teal-500"></i>
+                    </div>
+                    <h4 class="text-xl font-bold text-gray-900 mb-3">Trilingual Support</h4>
+                    <p class="text-gray-600 leading-relaxed text-sm">Seamlessly switch between English, Bahasa Melayu, and Chinese to suit your family's preferences.</p>
+                </div>
+
+                <div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-xl transition-all duration-300 group">
+                    <div class="w-14 h-14 bg-amber-100 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                        <i data-lucide="mic" class="w-6 h-6 text-amber-500"></i>
+                    </div>
+                    <h4 class="text-xl font-bold text-gray-900 mb-3">AI Voice Companion</h4>
+                    <p class="text-gray-600 leading-relaxed text-sm">Log meals quickly using voice commands and receive simple, instant AI-generated nutrition feedback.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="py-20 bg-white overflow-hidden">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="bg-emerald-500 rounded-3xl p-8 lg:p-16 relative overflow-hidden">
+                <div class="absolute top-0 right-0 -mr-20 -mt-20 w-96 h-96 bg-emerald-400 rounded-full opacity-50 blur-3xl"></div>
+                <div class="absolute bottom-0 left-0 -ml-20 -mb-20 w-80 h-80 bg-emerald-600 rounded-full opacity-50 blur-3xl"></div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center relative z-10">
+                    <div class="text-white">
+                        <h2 class="text-3xl lg:text-5xl font-bold mb-6">Designed for Parents, Loved by Kids</h2>
+                        <p class="text-emerald-50 text-lg mb-8 max-w-xl">
+                            Experience a smooth, intuitive interface that makes tracking growth, generating meal plans, and learning about nutrition feel effortless and fun.
+                        </p>
+                        <ul class="space-y-4 mb-8">
+                            <li class="flex items-center gap-3">
+                                <div class="bg-white/20 p-1.5 rounded-full"><i data-lucide="check-circle-2" class="w-5 h-5 text-white"></i></div>
+                                <span class="font-medium text-lg">No account registration required to start</span>
+                            </li>
+                            <li class="flex items-center gap-3">
+                                <div class="bg-white/20 p-1.5 rounded-full"><i data-lucide="check-circle-2" class="w-5 h-5 text-white"></i></div>
+                                <span class="font-medium text-lg">Secure local data storage</span>
+                            </li>
+                            <li class="flex items-center gap-3">
+                                <div class="bg-white/20 p-1.5 rounded-full"><i data-lucide="check-circle-2" class="w-5 h-5 text-white"></i></div>
+                                <span class="font-medium text-lg">Daily bite-sized actionable tips</span>
+                            </li>
+                        </ul>
+
+                        <a href="#download" class="inline-flex items-center gap-2 bg-white text-emerald-600 px-6 py-3 rounded-full font-bold hover:bg-gray-50 transition-colors shadow-lg">
+                            Explore The App <i data-lucide="chevron-right" class="w-5 h-5"></i>
+                        </a>
+                    </div>
+
+                    <div class="relative mx-auto w-full max-w-[300px]">
+                        <div class="absolute inset-0 bg-black rounded-[2.5rem] shadow-2xl transform rotate-3"></div>
+                        <img
+                                src="https://images.unsplash.com/photo-1629697776809-f37ceac39e77?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxzbWFydHBob25lJTIwYXBwJTIwbW9ja3VwfGVufDF8fHx8MTc3NjA4OTcwN3ww&ixlib=rb-4.1.0&q=80&w=1080"
+                                alt="App Mockup"
+                                class="relative rounded-[2.5rem] border-8 border-black shadow-2xl object-cover h-[600px] w-full"
+                        />
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="download" class="py-24 bg-gray-900 text-white text-center">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-3xl lg:text-5xl font-extrabold mb-6">Start Your Child's Healthy Journey Today</h2>
+            <p class="text-xl text-gray-400 mb-10 max-w-2xl mx-auto">
+                Download JomHealthy now and join thousands of Malaysian families making better, informed nutritional choices for their children.
+            </p>
+            <div class="flex flex-col sm:flex-row justify-center items-center gap-6">
+                <a href="javascript:void(0)" target="_blank" rel="noopener noreferrer" class="download-link w-full sm:w-auto bg-emerald-500 text-white hover:bg-emerald-600 px-8 py-4 rounded-xl font-bold transition-all flex items-center justify-center gap-3 shadow-lg">
+                    <i data-lucide="download" class="w-7 h-7"></i>
+                    <div class="text-left">
+                        <div class="text-[10px] leading-tight uppercase text-emerald-100 font-semibold">Download</div>
+                        <div class="text-lg leading-tight">Android APK</div>
+                    </div>
+                </a>
+            </div>
+            <p class="mt-8 text-sm text-gray-500">Requires Android 8.0 and up.</p>
+        </div>
+    </section>
+</main>
+
+<footer class="bg-white pt-16 pb-8 border-t border-gray-100">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-12 mb-12">
+            <div class="col-span-1 md:col-span-2">
+                <div class="flex items-center gap-2 mb-6">
+                    <div class="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center text-white font-bold text-lg">
+                        J
+                    </div>
+                    <span class="font-bold text-xl text-gray-900">
+                            Jom<span class="text-emerald-500">Healthy</span>
+                        </span>
+                </div>
+                <p class="text-gray-500 text-sm max-w-md mb-6 leading-relaxed">
+                    A Smart Eating Program for Children. Empowering parents in Malaysia to navigate their child's nutritional needs and foster healthy eating habits.
+                </p>
+                <div class="flex gap-4">
+                    <div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-emerald-100 hover:text-emerald-600 cursor-pointer transition-colors">
+                        <span class="font-bold text-sm">FB</span>
+                    </div>
+                    <div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-emerald-100 hover:text-emerald-600 cursor-pointer transition-colors">
+                        <span class="font-bold text-sm">IG</span>
+                    </div>
+                    <div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-emerald-100 hover:text-emerald-600 cursor-pointer transition-colors">
+                        <span class="font-bold text-sm">X</span>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <h4 class="font-bold text-gray-900 mb-4">Quick Links</h4>
+                <ul class="space-y-3 text-sm text-gray-500">
+                    <li><a href="#" class="hover:text-emerald-500 transition-colors">Home</a></li>
+                    <li><a href="#about" class="hover:text-emerald-500 transition-colors">About</a></li>
+                    <li><a href="#features" class="hover:text-emerald-500 transition-colors">Features</a></li>
+                    <li><a href="#download" class="hover:text-emerald-500 transition-colors">Download</a></li>
+                </ul>
+            </div>
+
+            <div>
+                <h4 class="font-bold text-gray-900 mb-4">Legal</h4>
+                <ul class="space-y-3 text-sm text-gray-500">
+                    <li><a href="#" class="hover:text-emerald-500 transition-colors">Privacy Policy</a></li>
+                    <li><a href="#" class="hover:text-emerald-500 transition-colors">Terms of Service</a></li>
+                    <li><a href="#" class="hover:text-emerald-500 transition-colors">Cookie Policy</a></li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="pt-8 border-t border-gray-100 flex flex-col md:flex-row justify-between items-center gap-4">
+            <p class="text-gray-400 text-sm">© <span th:text="${#dates.year(#dates.createNow())}">2024</span> JomHealthy. All rights reserved.</p>
+            <div class="text-sm font-medium text-emerald-600 bg-emerald-50 px-4 py-1.5 rounded-full">
+                Project by Team TM03 - Code Bees
+            </div>
+        </div>
+    </div>
+</footer>
+
+<script>
+    // 初始化 Lucide 图标
+    lucide.createIcons();
+
+    // 处理移动端菜单的展开/收起逻辑
+    const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+    const mobileMenu = document.getElementById('mobile-menu');
+    const iconMenu = document.getElementById('icon-menu');
+    const iconX = document.getElementById('icon-x');
+    const mobileLinks = document.querySelectorAll('.mobile-link');
+
+    function toggleMenu() {
+        const isHidden = mobileMenu.classList.contains('hidden');
+        if (isHidden) {
+            mobileMenu.classList.remove('hidden');
+            iconMenu.classList.add('hidden');
+            iconX.classList.remove('hidden');
+        } else {
+            mobileMenu.classList.add('hidden');
+            iconMenu.classList.remove('hidden');
+            iconX.classList.add('hidden');
+        }
+    }
+
+    mobileMenuBtn.addEventListener('click', toggleMenu);
+
+    mobileLinks.forEach(link => {
+        link.addEventListener('click', () => {
+            if (!mobileMenu.classList.contains('hidden')) {
+                toggleMenu();
+            }
+        });
+    });
+
+    /**
+     * 新增逻辑：从后端接口动态获取下载地址
+     */
+    async function fetchDownloadUrl() {
+        const links = document.querySelectorAll('.download-link');
+
+        // 1. 设置加载中样式
+        links.forEach(link => link.classList.add('loading-link'));
+
+        try {
+            // 2. 发起请求 (假设接口返回的是纯文本格式的 URL)
+            const response = await fetch('/getDownLoadUrl');
+
+            if (!response.ok) throw new Error('Network response was not ok');
+
+            const url = await response.text();
+
+            // 3. 更新所有下载按钮的 href
+            links.forEach(link => {
+                link.href = url.trim();
+                link.classList.remove('loading-link');
+            });
+
+            console.log('Download URL successfully fetched:', url);
+        } catch (error) {
+            console.error('Failed to fetch download URL:', error);
+            // 备用方案：如果接口报错，设置一个默认地址
+            // const fallbackUrl = "https://drive.google.com/file/d/1KrAzhBhJzNIqr13p2HlL0AWloIQj7AP1/view?usp=drive_link";
+            // links.forEach(link => {
+            //     link.href = fallbackUrl;
+            //     link.classList.remove('loading-link');
+            // });
+        }
+    }
+
+    // 页面加载完成后立即执行
+    document.addEventListener('DOMContentLoaded', fetchDownloadUrl);
+</script>
+</body>
+</html>

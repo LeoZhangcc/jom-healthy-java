@@ -1,6 +1,7 @@
 package com.jom.healthy.controller;
 
 import com.jom.healthy.entity.FoodNutrition;
+import com.jom.healthy.service.AppDownLoadService;
 import com.jom.healthy.service.FoodNutritionService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -8,6 +9,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 
+import javax.annotation.Resource;
 import javax.servlet.http.HttpSession;
 import java.util.List;
 
@@ -17,11 +19,26 @@ public class AdminController {
     @Autowired
     private FoodNutritionService foodNutritionService;
 
+    @Resource
+    private AppDownLoadService appDownLoadService;
+
     @Value("${ADMIN_PASSWORD}")
     private String adminPassword;
 
-    // 1. 登录跳转
+    // 首页
     @GetMapping("/")
+    public String indexPage() {
+        return "index";
+    }
+
+    @GetMapping("/getDownLoadUrl")
+    @ResponseBody
+    public String getDownLoadUrl() {
+        return appDownLoadService.getAppNewVersionUrl();
+    }
+
+    // 1. 登录跳转
+    @GetMapping("/admin")
     public String loginPage() {
         return "login";
     }
