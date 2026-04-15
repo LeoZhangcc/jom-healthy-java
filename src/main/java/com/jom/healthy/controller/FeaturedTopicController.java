@@ -1,27 +1,27 @@
 package com.jom.healthy.controller;
 
-import com.jom.healthy.Repository.FeaturedTopicRepository;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.jom.healthy.entity.FeaturedTopic;
-
+import com.jom.healthy.mapper.FeaturedTopicMapper;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.CrossOrigin;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
 @RestController
 @RequestMapping("/api/topics")
-@CrossOrigin(origins = "*") // 允许前端跨域访问
+@CrossOrigin(origins = "*")
 public class FeaturedTopicController {
 
     @Autowired
-    private FeaturedTopicRepository topicRepository;
+    private FeaturedTopicMapper topicMapper; // 注入 Mapper 代替 Repository
 
     @GetMapping("/all")
     public List<FeaturedTopic> getAllTopics() {
-        // 直接返回数据库里所有的文章
-        return topicRepository.findAllByOrderByCreatedAtDesc();
+        // 使用 LambdaQueryWrapper 实现逻辑：SELECT * FROM featured_topics ORDER BY created_at DESC
+        LambdaQueryWrapper<FeaturedTopic> wrapper = new LambdaQueryWrapper<>();
+        wrapper.orderByDesc(FeaturedTopic::getCreatedAt);
+
+        return topicMapper.selectList(wrapper);
     }
 }
