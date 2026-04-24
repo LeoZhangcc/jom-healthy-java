@@ -2,6 +2,7 @@ package com.jom.healthy.controller;
 
 
 import com.jom.healthy.service.FoodTransationaService;
+import com.jom.healthy.service.TheMealDbImportService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,11 +21,21 @@ public class FoodTransationaController {
     @Resource
     private FoodTransationaService foodTransationaService;
 
+    @Resource
+    private TheMealDbImportService theMealDbImportService;
+
 
     @PostMapping("/excuteFoodTrsantion")
     @ApiOperation("翻译食品名称(gemini)")
     public void excuteFoodTrsantion(@RequestParam("id") Integer id,
                                     @RequestParam("size")Integer size) {
         foodTransationaService.executeBatchTranslation(id, size);
+    }
+
+
+    @PostMapping("/importAllMeals")
+    @ApiOperation("导入theMeal")
+    public void importAllMeals() throws Exception {
+        theMealDbImportService.importAllMeals();
     }
 }
