@@ -2,6 +2,7 @@ package com.jom.healthy.controller;
 
 
 import com.jom.healthy.service.FoodTransationaService;
+import com.jom.healthy.service.GeminiFoodCandidateService;
 import com.jom.healthy.service.TheMealDbImportService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
@@ -24,6 +25,9 @@ public class FoodTransationaController {
     @Resource
     private TheMealDbImportService theMealDbImportService;
 
+    @Resource
+    private GeminiFoodCandidateService geminiFoodCandidateService;
+
 
     @PostMapping("/excuteFoodTrsantion")
     @ApiOperation("翻译食品名称(gemini)")
@@ -37,5 +41,11 @@ public class FoodTransationaController {
     @ApiOperation("导入theMeal")
     public void importAllMeals() throws Exception {
         theMealDbImportService.importAllMeals();
+    }
+
+    @PostMapping("/generateAllFoodCandidates")
+    @ApiOperation("generateAllFoodCandidates")
+    public void generateAllFoodCandidates() throws Exception {
+        geminiFoodCandidateService.generateAllFoodCandidates();
     }
 }
