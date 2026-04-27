@@ -1,5 +1,6 @@
 package com.jom.healthy.controller;
 
+import com.jom.healthy.dto.FoodNutritionDto;
 import com.jom.healthy.entity.FoodNutrition;
 import com.jom.healthy.service.AppDownLoadService;
 import com.jom.healthy.service.FoodNutritionService;
@@ -57,7 +58,7 @@ public class AdminController {
     @GetMapping("/manage")
     public String managePage(@RequestParam(required = false) String name, Model model, HttpSession session) {
         if (session.getAttribute("user") == null) return "redirect:/";
-        List<FoodNutrition> foods = foodNutritionService.queryFood(name);
+        List<FoodNutritionDto> foods = foodNutritionService.queryFood(name);
         model.addAttribute("foods", foods);
         return "manage";
     }

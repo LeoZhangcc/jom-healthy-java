@@ -30,7 +30,7 @@ import java.util.stream.Collectors;
 public class FoodTransationaServiceImpl implements FoodTransationaService {
 
 
-    private final String apiKey = "AIzaSyCYtxCPNRgI5rkc23LXPoNB9W13a7VrNIM";
+    private final String apiKey = "";
 
     private final String GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=";
 

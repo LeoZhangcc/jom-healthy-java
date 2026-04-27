@@ -2,6 +2,7 @@ package com.jom.healthy.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.jom.healthy.dto.FoodNutritionDto;
 import com.jom.healthy.dto.FoodNutritionNeedsDto;
 import com.jom.healthy.entity.BmiStandard;
 import com.jom.healthy.entity.FoodNutrition;
@@ -10,6 +11,7 @@ import com.jom.healthy.mapper.BmiMapper;
 import com.jom.healthy.mapper.FoodNutritionMapper;
 import com.jom.healthy.model.params.FoodNutritionParam;
 import com.jom.healthy.service.FoodNutritionService;
+import com.jom.healthy.util.FoodHealthCalculator;
 import com.jom.healthy.util.ToolUtil;
 import com.jom.healthy.util.response.ResponseData;
 import lombok.extern.slf4j.Slf4j;
@@ -18,12 +20,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
 
-import javax.annotation.Resource;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 @Service
 @Slf4j
@@ -39,12 +39,17 @@ public class FoodNutritionServiceImpl extends ServiceImpl<FoodNutritionMapper, F
     }
 
     @Override
-    public List<FoodNutrition> queryFood(String name) {
+    public List<FoodNutritionDto> queryFood(String name) {
         QueryWrapper<FoodNutrition> queryWrapper = new QueryWrapper<>();
         queryWrapper.like("food_name_combine", name);
         List<FoodNutrition> foodNutritions = this.baseMapper.selectList(queryWrapper);
+        List<FoodNutritionDto> result = new ArrayList<>();
 
-        return foodNutritions;
+        for (FoodNutrition food : foodNutritions) {
+            FoodNutritionDto dto = FoodHealthCalculator.calculate(food);
+            result.add(dto);
+        }
+        return result;
     }
 
     @Override
@@ -262,4 +267,6 @@ public class FoodNutritionServiceImpl extends ServiceImpl<FoodNutritionMapper, F
         foodNutritionNeedsDto.setFat(calories.multiply(new BigDecimal("0.3").divide(new BigDecimal(9))).setScale(0,RoundingMode.HALF_UP).intValue());
         return foodNutritionNeedsDto;
     }
+
+
 }

@@ -18,6 +18,11 @@ public class FoodNutritionController {
     private FoodNutritionService foodNutritionService;
 
 
+    /**
+     * https://www.who.int/news-room/fact-sheets/detail/healthy-diet
+     * https://www.nutrition.org.uk/creating-a-healthy-diet/food-labelling
+     * 健康评分相关文章
+     */
     @ResponseBody
     @ApiOperation("查询食物")
     @PostMapping("/getFoodNutrition")
