@@ -17,14 +17,8 @@ public class FoodHealthCalculator {
 
         int score = 70;
 
-        List<String> goodEn = new ArrayList<>();
-        List<String> warningEn = new ArrayList<>();
-
-        List<String> goodCn = new ArrayList<>();
-        List<String> warningCn = new ArrayList<>();
-
-        List<String> goodMs = new ArrayList<>();
-        List<String> warningMs = new ArrayList<>();
+        List<String> warningKeys = new ArrayList<>();
+        List<String> goodKeys = new ArrayList<>();
 
         BigDecimal energy = n(food.getEnergyKcal());
         BigDecimal protein = n(food.getProteinG());
@@ -55,175 +49,85 @@ public class FoodHealthCalculator {
                 || name.contains("salt")
                 || name.contains("ketchup");
 
-        // 1. 热量
+        // 1. Calories
         if (energy.compareTo(bd("500")) > 0) {
             score -= 25;
-            addWarning(
-                    warningEn, warningCn, warningMs,
-                    "it is very high in calories",
-                    "热量非常高",
-                    "kalorinya sangat tinggi"
-            );
+            warningKeys.add("very_high_calorie");
         } else if (energy.compareTo(bd("300")) > 0) {
             score -= 15;
-            addWarning(
-                    warningEn, warningCn, warningMs,
-                    "it is high in calories",
-                    "热量偏高",
-                    "kalorinya tinggi"
-            );
+            warningKeys.add("high_calorie");
         } else if (energy.compareTo(bd("150")) <= 0) {
             score += 5;
-            addGood(
-                    goodEn, goodCn, goodMs,
-                    "it is relatively low in calories",
-                    "热量较低",
-                    "kalorinya lebih rendah"
-            );
+            goodKeys.add("low_calorie");
         }
 
-        // 2. 脂肪
+        // 2. Fat
         if (fat.compareTo(bd("30")) > 0) {
             if (isOilOrFat) {
                 score -= 10;
-                addWarning(
-                        warningEn, warningCn, warningMs,
-                        "it is an oil or fat-based food, so it should be used in small amounts",
-                        "属于油脂类食物，建议控制用量",
-                        "ia makanan berasaskan minyak atau lemak, jadi perlu diambil dalam jumlah kecil"
-                );
+                warningKeys.add("oil_small_amount");
             } else {
                 score -= 25;
-                addWarning(
-                        warningEn, warningCn, warningMs,
-                        "it is very high in fat",
-                        "脂肪含量非常高",
-                        "lemaknya sangat tinggi"
-                );
+                warningKeys.add("very_high_fat");
             }
         } else if (fat.compareTo(bd("17.5")) > 0) {
             if (isOilOrFat) {
                 score -= 5;
-                addWarning(
-                        warningEn, warningCn, warningMs,
-                        "it is high in fat, so portion size matters",
-                        "脂肪较高，需要注意份量",
-                        "lemaknya tinggi, jadi saiz hidangan perlu dikawal"
-                );
+                warningKeys.add("oil_small_amount");
             } else {
                 score -= 15;
-                addWarning(
-                        warningEn, warningCn, warningMs,
-                        "it is high in fat",
-                        "脂肪含量较高",
-                        "lemaknya tinggi"
-                );
+                warningKeys.add("high_fat");
             }
         } else if (fat.compareTo(bd("3")) <= 0) {
             score += 5;
-            addGood(
-                    goodEn, goodCn, goodMs,
-                    "it is low in fat",
-                    "脂肪较低",
-                    "rendah lemak"
-            );
+            goodKeys.add("low_fat");
         }
 
-        // 3. 钠
+        // 3. Sodium
         if (sodium.compareTo(bd("1000")) > 0) {
             score -= 25;
-            addWarning(
-                    warningEn, warningCn, warningMs,
-                    "it is very high in sodium",
-                    "钠含量非常高",
-                    "natriumnya sangat tinggi"
-            );
+            warningKeys.add("very_high_sodium");
         } else if (sodium.compareTo(bd("600")) > 0) {
             score -= 15;
-            addWarning(
-                    warningEn, warningCn, warningMs,
-                    "it is high in sodium",
-                    "钠含量较高",
-                    "natriumnya tinggi"
-            );
+            warningKeys.add("high_sodium");
         } else if (sodium.compareTo(bd("120")) <= 0) {
             score += 5;
-            addGood(
-                    goodEn, goodCn, goodMs,
-                    "it is low in sodium",
-                    "钠含量较低",
-                    "rendah natrium"
-            );
+            goodKeys.add("low_sodium");
         }
 
         if (isCondiment && sodium.compareTo(bd("600")) > 0) {
             score -= 5;
-            addWarning(
-                    warningEn, warningCn, warningMs,
-                    "it is a condiment, so it is better to use only a small amount",
-                    "属于调味品类，更适合少量使用",
-                    "ia sejenis perasa, jadi lebih baik digunakan dalam jumlah kecil"
-            );
+            warningKeys.add("condiment_limit");
         }
 
-        // 4. 碳水 + 纤维组合
+        // 4. Carbs + fibre
         if (carb.compareTo(bd("60")) > 0 && fibre.compareTo(bd("3")) < 0) {
             score -= 10;
-            addWarning(
-                    warningEn, warningCn, warningMs,
-                    "it is high in carbohydrates but low in fibre",
-                    "碳水较高但膳食纤维较低",
-                    "karbohidratnya tinggi tetapi seratnya rendah"
-            );
+            warningKeys.add("high_carb_low_fibre");
         } else if (carb.compareTo(bd("60")) > 0 && fibre.compareTo(bd("6")) >= 0) {
             score += 5;
-            addGood(
-                    goodEn, goodCn, goodMs,
-                    "it provides carbohydrates together with a good amount of fibre",
-                    "虽然碳水较高，但膳食纤维也较丰富",
-                    "ia membekalkan karbohidrat bersama serat yang baik"
-            );
+            goodKeys.add("high_fibre_carb");
         }
 
-        // 5. 蛋白质
+        // 5. Protein
         if (protein.compareTo(bd("10")) >= 0) {
             score += 10;
-            addGood(
-                    goodEn, goodCn, goodMs,
-                    "it provides a good amount of protein",
-                    "蛋白质含量不错",
-                    "ia membekalkan protein yang baik"
-            );
+            goodKeys.add("high_protein");
         } else if (protein.compareTo(bd("5")) >= 0) {
             score += 5;
-            addGood(
-                    goodEn, goodCn, goodMs,
-                    "it contains some protein",
-                    "含有一定蛋白质",
-                    "ia mengandungi sedikit protein"
-            );
+            goodKeys.add("some_protein");
         }
 
-        // 6. 膳食纤维
+        // 6. Fibre
         if (fibre.compareTo(bd("6")) >= 0) {
             score += 10;
-            addGood(
-                    goodEn, goodCn, goodMs,
-                    "it is rich in dietary fibre",
-                    "膳食纤维较丰富",
-                    "ia kaya dengan serat diet"
-            );
+            goodKeys.add("high_fibre");
         } else if (fibre.compareTo(bd("3")) >= 0) {
             score += 5;
-            addGood(
-                    goodEn, goodCn, goodMs,
-                    "it contains some dietary fibre",
-                    "含有一定膳食纤维",
-                    "ia mengandungi sedikit serat diet"
-            );
+            goodKeys.add("some_fibre");
         }
 
-        // 7. 微量营养素
+        // 7. Vitamins and minerals
         boolean hasMicronutrient = false;
 
         if (potassium.compareTo(bd("300")) >= 0) {
@@ -247,23 +151,13 @@ public class FoodHealthCalculator {
         }
 
         if (hasMicronutrient) {
-            addGood(
-                    goodEn, goodCn, goodMs,
-                    "it contains useful vitamins or minerals",
-                    "含有一定维生素或矿物质",
-                    "ia mengandungi vitamin atau mineral yang bermanfaat"
-            );
+            goodKeys.add("vitamin_mineral");
         }
 
-        // 8. 胆固醇
+        // 8. Cholesterol
         if (cholesterol.compareTo(bd("100")) > 0) {
             score -= 5;
-            addWarning(
-                    warningEn, warningCn, warningMs,
-                    "it is relatively high in cholesterol",
-                    "胆固醇偏高",
-                    "kolesterolnya agak tinggi"
-            );
+            warningKeys.add("high_cholesterol");
         }
 
         score = Math.max(0, Math.min(100, score));
@@ -272,201 +166,187 @@ public class FoodHealthCalculator {
         dto.setHealthGrade(toGrade(score));
         dto.setHealthLabel(toLabel(score));
 
-        dto.setHealthReasonEn(buildReasonEn(score, goodEn, warningEn));
-        dto.setHealthReasonCn(buildReasonCn(score, goodCn, warningCn));
-        dto.setHealthReasonMs(buildReasonMs(score, goodMs, warningMs));
+        dto.setHealthReasonEn(buildShortReasonEn(score, goodKeys, warningKeys));
+        dto.setHealthReasonCn(buildShortReasonCn(score, goodKeys, warningKeys));
+        dto.setHealthReasonMs(buildShortReasonMs(score, goodKeys, warningKeys));
+
+        dto.setParentTipsEn(buildTipsEn(score, goodKeys, warningKeys));
+        dto.setParentTipsCn(buildTipsCn(score, goodKeys, warningKeys));
+        dto.setParentTipsMs(buildTipsMs(score, goodKeys, warningKeys));
 
         return dto;
     }
 
-    private static void addGood(
-            List<String> goodEn,
-            List<String> goodCn,
-            List<String> goodMs,
-            String en,
-            String cn,
-            String ms
-    ) {
-        goodEn.add(en);
-        goodCn.add(cn);
-        goodMs.add(ms);
+    private static String buildShortReasonEn(int score, List<String> good, List<String> warning) {
+        if (score >= 85) {
+            return "This is a healthy choice for children.";
+        }
+        if (score >= 70) {
+            return "This is a good choice, but portion size still matters.";
+        }
+        if (score >= 55) {
+            return "This food is acceptable, but it should be balanced with healthier foods.";
+        }
+        if (score >= 40) {
+            return "This food is less ideal for frequent intake.";
+        }
+        return "This food is better eaten only occasionally.";
     }
 
-    private static void addWarning(
-            List<String> warningEn,
-            List<String> warningCn,
-            List<String> warningMs,
-            String en,
-            String cn,
-            String ms
-    ) {
-        warningEn.add(en);
-        warningCn.add(cn);
-        warningMs.add(ms);
+    private static String buildShortReasonCn(int score, List<String> good, List<String> warning) {
+        if (score >= 85) {
+            return "这是比较适合儿童的健康选择。";
+        }
+        if (score >= 70) {
+            return "这是不错的选择，但仍然需要注意份量。";
+        }
+        if (score >= 55) {
+            return "这种食物整体可以接受，但建议搭配更健康的食物。";
+        }
+        if (score >= 40) {
+            return "这种食物不太适合经常吃。";
+        }
+        return "这种食物更适合偶尔吃，不建议经常食用。";
     }
 
-    private static String buildReasonEn(int score, List<String> good, List<String> warning) {
-        if (good.isEmpty() && warning.isEmpty()) {
-            return defaultReasonEn(score);
+    private static String buildShortReasonMs(int score, List<String> good, List<String> warning) {
+        if (score >= 85) {
+            return "Ini adalah pilihan yang sihat untuk kanak-kanak.";
         }
-
-        StringBuilder sb = new StringBuilder();
-
-        if (!good.isEmpty()) {
-            sb.append("This food has some positive nutrition points because ")
-                    .append(joinEn(good))
-                    .append(". ");
+        if (score >= 70) {
+            return "Ini pilihan yang baik, tetapi saiz hidangan masih perlu dikawal.";
         }
-
-        if (!warning.isEmpty()) {
-            sb.append("However, ")
-                    .append(joinEn(warning))
-                    .append(", so it is better to eat it in a moderate portion.");
-        } else {
-            sb.append("It can be included as part of a balanced diet.");
+        if (score >= 55) {
+            return "Makanan ini boleh diterima, tetapi perlu diseimbangkan dengan makanan yang lebih sihat.";
         }
-
-        return sb.toString();
+        if (score >= 40) {
+            return "Makanan ini kurang sesuai untuk diambil dengan kerap.";
+        }
+        return "Makanan ini lebih sesuai dimakan sekali-sekala sahaja.";
     }
 
-    private static String buildReasonCn(int score, List<String> good, List<String> warning) {
-        if (good.isEmpty() && warning.isEmpty()) {
-            return defaultReasonCn(score);
+    private static List<String> buildTipsEn(int score, List<String> good, List<String> warning) {
+        List<String> tips = new ArrayList<>();
+
+        if (warning.contains("very_high_sodium") || warning.contains("high_sodium") || warning.contains("condiment_limit")) {
+            tips.add("Avoid adding extra salt, soy sauce, or other salty sauces.");
         }
 
-        StringBuilder sb = new StringBuilder();
-
-        if (!good.isEmpty()) {
-            sb.append("这种食物有一些营养优点，比如")
-                    .append(String.join("、", good))
-                    .append("。");
+        if (warning.contains("very_high_fat") || warning.contains("high_fat") || warning.contains("oil_small_amount")) {
+            tips.add("Choose grilled, steamed, or boiled versions when possible.");
         }
 
-        if (!warning.isEmpty()) {
-            sb.append("不过")
-                    .append(String.join("、", warning))
-                    .append("，建议控制份量，不要一次吃太多。");
-        } else {
-            sb.append("可以作为均衡饮食的一部分。");
+        if (warning.contains("very_high_calorie") || warning.contains("high_calorie")) {
+            tips.add("Keep the portion moderate, especially for younger children.");
         }
 
-        return sb.toString();
+        if (warning.contains("high_carb_low_fibre")) {
+            tips.add("Pair it with vegetables, fruit, or whole grains for more fibre.");
+        }
+
+        if (good.contains("high_protein") || good.contains("some_protein")) {
+            tips.add("Pair it with vegetables or whole grains for a more balanced meal.");
+        }
+
+        if (good.contains("high_fibre") || good.contains("some_fibre")) {
+            tips.add("This can support digestion, but still serve an age-appropriate portion.");
+        }
+
+        if (tips.isEmpty()) {
+            tips.add("Pair with fresh vegetables or fruit for more nutrients.");
+            tips.add("Serve an age-appropriate portion for your child.");
+            tips.add("Choose grilled, steamed, or boiled options when possible.");
+        }
+
+        return limitTips(tips);
     }
 
-    private static String buildReasonMs(int score, List<String> good, List<String> warning) {
-        if (good.isEmpty() && warning.isEmpty()) {
-            return defaultReasonMs(score);
+    private static List<String> buildTipsCn(int score, List<String> good, List<String> warning) {
+        List<String> tips = new ArrayList<>();
+
+        if (warning.contains("very_high_sodium") || warning.contains("high_sodium") || warning.contains("condiment_limit")) {
+            tips.add("避免额外加入盐、酱油或其他高钠酱料。");
         }
 
-        StringBuilder sb = new StringBuilder();
-
-        if (!good.isEmpty()) {
-            sb.append("Makanan ini mempunyai beberapa kelebihan nutrisi kerana ")
-                    .append(joinMs(good))
-                    .append(". ");
+        if (warning.contains("very_high_fat") || warning.contains("high_fat") || warning.contains("oil_small_amount")) {
+            tips.add("能选择蒸、煮、烤时，尽量少选油炸。");
         }
 
-        if (!warning.isEmpty()) {
-            sb.append("Namun, ")
-                    .append(joinMs(warning))
-                    .append(", jadi lebih baik diambil dalam jumlah sederhana.");
-        } else {
-            sb.append("Ia boleh dimasukkan sebagai sebahagian daripada diet seimbang.");
+        if (warning.contains("very_high_calorie") || warning.contains("high_calorie")) {
+            tips.add("注意控制份量，尤其是年龄较小的儿童。");
         }
 
-        return sb.toString();
+        if (warning.contains("high_carb_low_fibre")) {
+            tips.add("建议搭配蔬菜、水果或全谷物，增加膳食纤维。");
+        }
+
+        if (good.contains("high_protein") || good.contains("some_protein")) {
+            tips.add("可以搭配蔬菜或全谷物，让这一餐更均衡。");
+        }
+
+        if (good.contains("high_fibre") || good.contains("some_fibre")) {
+            tips.add("有助于增加纤维摄入，但仍要注意儿童适量食用。");
+        }
+
+        if (tips.isEmpty()) {
+            tips.add("建议搭配新鲜蔬菜或水果，增加营养。");
+            tips.add("根据孩子年龄控制合适份量。");
+            tips.add("能选择蒸、煮、烤时，尽量少选油炸。");
+        }
+
+        return limitTips(tips);
     }
 
-    private static String joinEn(List<String> list) {
-        if (list.size() == 1) {
-            return list.get(0);
+    private static List<String> buildTipsMs(int score, List<String> good, List<String> warning) {
+        List<String> tips = new ArrayList<>();
+
+        if (warning.contains("very_high_sodium") || warning.contains("high_sodium") || warning.contains("condiment_limit")) {
+            tips.add("Elakkan menambah garam, kicap atau sos yang tinggi natrium.");
         }
 
-        if (list.size() == 2) {
-            return list.get(0) + " and " + list.get(1);
+        if (warning.contains("very_high_fat") || warning.contains("high_fat") || warning.contains("oil_small_amount")) {
+            tips.add("Pilih makanan yang dipanggang, dikukus atau direbus jika boleh.");
         }
 
-        StringBuilder sb = new StringBuilder();
+        if (warning.contains("very_high_calorie") || warning.contains("high_calorie")) {
+            tips.add("Kawal saiz hidangan, terutamanya untuk kanak-kanak yang lebih kecil.");
+        }
 
-        for (int i = 0; i < list.size(); i++) {
-            if (i == list.size() - 1) {
-                sb.append("and ").append(list.get(i));
-            } else {
-                sb.append(list.get(i)).append(", ");
+        if (warning.contains("high_carb_low_fibre")) {
+            tips.add("Padankan dengan sayur, buah atau bijirin penuh untuk menambah serat.");
+        }
+
+        if (good.contains("high_protein") || good.contains("some_protein")) {
+            tips.add("Padankan dengan sayur atau bijirin penuh untuk hidangan yang lebih seimbang.");
+        }
+
+        if (good.contains("high_fibre") || good.contains("some_fibre")) {
+            tips.add("Ia boleh membantu pengambilan serat, tetapi hidangkan dalam jumlah yang sesuai.");
+        }
+
+        if (tips.isEmpty()) {
+            tips.add("Padankan dengan sayur atau buah segar untuk lebih nutrien.");
+            tips.add("Hidangkan mengikut saiz hidangan yang sesuai untuk umur anak.");
+            tips.add("Pilih kaedah panggang, kukus atau rebus jika boleh.");
+        }
+
+        return limitTips(tips);
+    }
+
+    private static List<String> limitTips(List<String> tips) {
+        List<String> result = new ArrayList<>();
+
+        for (String tip : tips) {
+            if (!result.contains(tip)) {
+                result.add(tip);
+            }
+
+            if (result.size() >= 3) {
+                break;
             }
         }
 
-        return sb.toString();
-    }
-
-    private static String joinMs(List<String> list) {
-        if (list.size() == 1) {
-            return list.get(0);
-        }
-
-        if (list.size() == 2) {
-            return list.get(0) + " dan " + list.get(1);
-        }
-
-        StringBuilder sb = new StringBuilder();
-
-        for (int i = 0; i < list.size(); i++) {
-            if (i == list.size() - 1) {
-                sb.append("dan ").append(list.get(i));
-            } else {
-                sb.append(list.get(i)).append(", ");
-            }
-        }
-
-        return sb.toString();
-    }
-
-    private static String defaultReasonEn(int score) {
-        if (score >= 85) {
-            return "This food looks like a healthy choice and can be included as part of a balanced diet.";
-        }
-        if (score >= 70) {
-            return "This food is generally a good choice, but portion size still matters.";
-        }
-        if (score >= 55) {
-            return "This food is moderate overall. It can be eaten sometimes and should be balanced with healthier foods.";
-        }
-        if (score >= 40) {
-            return "This food is less ideal for frequent intake. Try to keep the portion small and balance it with vegetables, fruits, or protein-rich foods.";
-        }
-        return "This food is not the best choice for regular intake. It is better to eat it only occasionally.";
-    }
-
-    private static String defaultReasonCn(int score) {
-        if (score >= 85) {
-            return "这种食物整体比较健康，可以作为均衡饮食的一部分。";
-        }
-        if (score >= 70) {
-            return "这种食物整体还不错，但仍然需要注意份量。";
-        }
-        if (score >= 55) {
-            return "这种食物整体属于中等水平，可以偶尔吃，但建议搭配更健康的食物。";
-        }
-        if (score >= 40) {
-            return "这种食物不太适合经常吃，建议减少份量，并搭配蔬菜、水果或优质蛋白。";
-        }
-        return "这种食物不建议经常吃，更适合作为偶尔食用的食物。";
-    }
-
-    private static String defaultReasonMs(int score) {
-        if (score >= 85) {
-            return "Makanan ini kelihatan sebagai pilihan yang sihat dan boleh dimasukkan dalam diet seimbang.";
-        }
-        if (score >= 70) {
-            return "Makanan ini secara umum adalah pilihan yang baik, tetapi saiz hidangan masih perlu dikawal.";
-        }
-        if (score >= 55) {
-            return "Makanan ini berada pada tahap sederhana. Ia boleh dimakan sekali-sekala dan perlu diseimbangkan dengan makanan yang lebih sihat.";
-        }
-        if (score >= 40) {
-            return "Makanan ini kurang sesuai untuk diambil dengan kerap. Cuba ambil dalam jumlah kecil dan seimbangkan dengan sayur, buah atau makanan tinggi protein.";
-        }
-        return "Makanan ini kurang sesuai untuk pengambilan harian. Lebih baik dimakan sekali-sekala sahaja.";
+        return result;
     }
 
     private static String toGrade(int score) {
@@ -487,18 +367,18 @@ public class FoodHealthCalculator {
 
     private static String toLabel(int score) {
         if (score >= 85) {
-            return "Healthy";
+            return "Healthy Choice";
         }
         if (score >= 70) {
-            return "Good";
+            return "Good Choice";
         }
         if (score >= 55) {
-            return "Moderate";
+            return "Moderate Choice";
         }
         if (score >= 40) {
-            return "Less healthy";
+            return "Limit Often";
         }
-        return "Unhealthy";
+        return "Occasional Only";
     }
 
     private static BigDecimal n(Number value) {
@@ -512,4 +392,5 @@ public class FoodHealthCalculator {
     private static BigDecimal bd(String value) {
         return new BigDecimal(value);
     }
+
 }

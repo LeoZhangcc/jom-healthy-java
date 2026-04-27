@@ -5,11 +5,15 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jom.healthy.dto.MealIngredientNutritionDto;
+import com.jom.healthy.dto.MealNutritionDto;
+import com.jom.healthy.dto.MealNutritionRowDto;
 import com.jom.healthy.entity.TheMealDbMeal;
 import com.jom.healthy.entity.TheMealDbMealIngredient;
 import com.jom.healthy.mapper.TheMealDbMealIngredientMapper;
 import com.jom.healthy.mapper.TheMealDbMealMapper;
-import com.jom.healthy.service.TheMealDbImportService;
+import com.jom.healthy.service.TheMealService;
+import com.jom.healthy.util.MeasureToGramConverter;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,16 +23,22 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
-public class TheMealDbImportServiceImpl extends ServiceImpl<TheMealDbMealMapper, TheMealDbMeal> implements TheMealDbImportService {
+public class TheMealServiceImpl extends ServiceImpl<TheMealDbMealMapper, TheMealDbMeal> implements TheMealService {
 
     private static final String API_BASE = "https://www.themealdb.com/api/json/v1/1/search.php?f=";
 
@@ -39,6 +49,191 @@ public class TheMealDbImportServiceImpl extends ServiceImpl<TheMealDbMealMapper,
     private TheMealDbMealIngredientMapper ingredientMapper;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+
+
+    @Override
+    public List<MealNutritionDto> searchMealsByNamePrefix(String keyword) {
+        if (keyword == null) {
+            keyword = "";
+        }
+
+        keyword = keyword.trim();
+
+        List<MealNutritionRowDto> rows = mealMapper.searchMealNutritionByPrefix(keyword);
+
+        Map<String, MealNutritionDto> mealMap = new LinkedHashMap<>();
+
+        for (MealNutritionRowDto row : rows) {
+            MealNutritionDto mealDto = mealMap.get(row.getIdMeal());
+
+            if (mealDto == null) {
+                mealDto = buildMealDto(row);
+                mealMap.put(row.getIdMeal(), mealDto);
+            }
+
+            if (row.getIngredientId() != null) {
+                MealIngredientNutritionDto ingredientDto = buildIngredientDto(row);
+                mealDto.getIngredients().add(ingredientDto);
+
+                mealDto.setTotalEnergyKcal(
+                        mealDto.getTotalEnergyKcal().add(ingredientDto.getEnergyKcal())
+                );
+                mealDto.setTotalProteinG(
+                        mealDto.getTotalProteinG().add(ingredientDto.getProteinG())
+                );
+                mealDto.setTotalCarbohydrateG(
+                        mealDto.getTotalCarbohydrateG().add(ingredientDto.getCarbohydrateG())
+                );
+                mealDto.setTotalFatG(
+                        mealDto.getTotalFatG().add(ingredientDto.getFatG())
+                );
+            }
+        }
+
+        for (MealNutritionDto dto : mealMap.values()) {
+            dto.setTotalEnergyKcal(round(dto.getTotalEnergyKcal()));
+            dto.setTotalProteinG(round(dto.getTotalProteinG()));
+            dto.setTotalCarbohydrateG(round(dto.getTotalCarbohydrateG()));
+            dto.setTotalFatG(round(dto.getTotalFatG()));
+        }
+
+        return new ArrayList<>(mealMap.values());
+    }
+
+    private MealNutritionDto buildMealDto(MealNutritionRowDto row) {
+        MealNutritionDto dto = new MealNutritionDto();
+
+        dto.setId(row.getMealDbId());
+        dto.setIdMeal(row.getIdMeal());
+
+        dto.setStrMeal(row.getStrMeal());
+        dto.setStrMealAlternate(row.getStrMealAlternate());
+        dto.setStrCategory(row.getStrCategory());
+        dto.setStrArea(row.getStrArea());
+        dto.setStrInstructions(row.getStrInstructions());
+        dto.setStrMealThumb(row.getStrMealThumb());
+        dto.setStrTags(row.getStrTags());
+        dto.setStrYoutube(row.getStrYoutube());
+
+        dto.setStrIngredient1(row.getStrIngredient1());
+        dto.setStrIngredient2(row.getStrIngredient2());
+        dto.setStrIngredient3(row.getStrIngredient3());
+        dto.setStrIngredient4(row.getStrIngredient4());
+        dto.setStrIngredient5(row.getStrIngredient5());
+        dto.setStrIngredient6(row.getStrIngredient6());
+        dto.setStrIngredient7(row.getStrIngredient7());
+        dto.setStrIngredient8(row.getStrIngredient8());
+        dto.setStrIngredient9(row.getStrIngredient9());
+        dto.setStrIngredient10(row.getStrIngredient10());
+        dto.setStrIngredient11(row.getStrIngredient11());
+        dto.setStrIngredient12(row.getStrIngredient12());
+        dto.setStrIngredient13(row.getStrIngredient13());
+        dto.setStrIngredient14(row.getStrIngredient14());
+        dto.setStrIngredient15(row.getStrIngredient15());
+        dto.setStrIngredient16(row.getStrIngredient16());
+        dto.setStrIngredient17(row.getStrIngredient17());
+        dto.setStrIngredient18(row.getStrIngredient18());
+        dto.setStrIngredient19(row.getStrIngredient19());
+        dto.setStrIngredient20(row.getStrIngredient20());
+
+        dto.setStrMeasure1(row.getStrMeasure1());
+        dto.setStrMeasure2(row.getStrMeasure2());
+        dto.setStrMeasure3(row.getStrMeasure3());
+        dto.setStrMeasure4(row.getStrMeasure4());
+        dto.setStrMeasure5(row.getStrMeasure5());
+        dto.setStrMeasure6(row.getStrMeasure6());
+        dto.setStrMeasure7(row.getStrMeasure7());
+        dto.setStrMeasure8(row.getStrMeasure8());
+        dto.setStrMeasure9(row.getStrMeasure9());
+        dto.setStrMeasure10(row.getStrMeasure10());
+        dto.setStrMeasure11(row.getStrMeasure11());
+        dto.setStrMeasure12(row.getStrMeasure12());
+        dto.setStrMeasure13(row.getStrMeasure13());
+        dto.setStrMeasure14(row.getStrMeasure14());
+        dto.setStrMeasure15(row.getStrMeasure15());
+        dto.setStrMeasure16(row.getStrMeasure16());
+        dto.setStrMeasure17(row.getStrMeasure17());
+        dto.setStrMeasure18(row.getStrMeasure18());
+        dto.setStrMeasure19(row.getStrMeasure19());
+        dto.setStrMeasure20(row.getStrMeasure20());
+
+        dto.setStrSource(row.getStrSource());
+        dto.setStrImageSource(row.getStrImageSource());
+        dto.setStrCreativeCommonsConfirmed(row.getStrCreativeCommonsConfirmed());
+
+        dto.setDateModified(row.getDateModified());
+        dto.setCreatedAt(row.getCreatedAt());
+        dto.setUpdatedAt(row.getUpdatedAt());
+
+        dto.setTotalEnergyKcal(BigDecimal.ZERO);
+        dto.setTotalProteinG(BigDecimal.ZERO);
+        dto.setTotalCarbohydrateG(BigDecimal.ZERO);
+        dto.setTotalFatG(BigDecimal.ZERO);
+
+        dto.setIngredients(new ArrayList<>());
+
+        return dto;
+    }
+
+    private MealIngredientNutritionDto buildIngredientDto(MealNutritionRowDto row) {
+        MealIngredientNutritionDto dto = new MealIngredientNutritionDto();
+
+        dto.setIngredientId(row.getIngredientId());
+        dto.setMealId(row.getMealId());
+        dto.setIngredientOrder(row.getIngredientOrder());
+        dto.setIngredientName(row.getIngredientName());
+        dto.setMeasure(row.getMeasure());
+        dto.setNormalizedName(row.getNormalizedName());
+        dto.setMyfcdFoodId(row.getMyfcdFoodId());
+        dto.setMyfcdFoodName(row.getMyfcdFoodName());
+        dto.setGramsEstimated(row.getGramsEstimated());
+        dto.setMappingConfidence(row.getMappingConfidence());
+
+        dto.setFoodId(row.getFoodId());
+        dto.setFoodNameEn(row.getFoodNameEn());
+        dto.setFoodNameCn(row.getFoodNameCn());
+        dto.setFoodNameMs(row.getFoodNameMs());
+        dto.setFoodGroup(row.getFoodGroup());
+        dto.setPicUrl(row.getPicUrl());
+
+        dto.setEnergyKcalPer100g(row.getEnergyKcalPer100g());
+        dto.setProteinGPer100g(row.getProteinGPer100g());
+        dto.setCarbohydrateGPer100g(row.getCarbohydrateGPer100g());
+        dto.setFatGPer100g(row.getFatGPer100g());
+
+        BigDecimal grams = row.getGramsEstimated();
+
+        if (grams == null || grams.compareTo(BigDecimal.ZERO) <= 0) {
+            grams = MeasureToGramConverter.convertToGram(
+                    row.getMeasure(),
+                    row.getIngredientName(),
+                    row.getNormalizedName()
+            );
+        }
+
+        dto.setGramsEstimated(grams);
+
+        dto.setEnergyKcal(calculateByGram(row.getEnergyKcalPer100g(), grams));
+        dto.setProteinG(calculateByGram(row.getProteinGPer100g(), grams));
+        dto.setCarbohydrateG(calculateByGram(row.getCarbohydrateGPer100g(), grams));
+        dto.setFatG(calculateByGram(row.getFatGPer100g(), grams));
+
+        return dto;
+    }
+
+    private BigDecimal calculateByGram(Number valuePer100g, BigDecimal grams) {
+        if (valuePer100g == null || grams == null) {
+            return BigDecimal.ZERO;
+        }
+
+        return BigDecimal.valueOf(valuePer100g.doubleValue())
+                .multiply(grams)
+                .divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP)
+                .setScale(2, RoundingMode.HALF_UP);
+    }
+
+
 
     public void importAllMeals() throws Exception {
         for (char c = 'a'; c <= 'z'; c++) {
@@ -276,5 +471,13 @@ public class TheMealDbImportServiceImpl extends ServiceImpl<TheMealDbMealMapper,
         return name.trim()
                 .toLowerCase()
                 .replaceAll("\\s+", " ");
+    }
+
+    private BigDecimal round(BigDecimal value) {
+        if (value == null) {
+            return BigDecimal.ZERO;
+        }
+
+        return value.setScale(2, RoundingMode.HALF_UP);
     }
 }

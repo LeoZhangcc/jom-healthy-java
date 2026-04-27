@@ -3,7 +3,7 @@ package com.jom.healthy.controller;
 
 import com.jom.healthy.service.FoodTransationaService;
 import com.jom.healthy.service.GeminiFoodCandidateService;
-import com.jom.healthy.service.TheMealDbImportService;
+import com.jom.healthy.service.TheMealService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -23,7 +23,7 @@ public class FoodTransationaController {
     private FoodTransationaService foodTransationaService;
 
     @Resource
-    private TheMealDbImportService theMealDbImportService;
+    private TheMealService theMealDbImportService;
 
     @Resource
     private GeminiFoodCandidateService geminiFoodCandidateService;
