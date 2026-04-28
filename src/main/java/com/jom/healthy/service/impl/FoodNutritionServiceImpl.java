@@ -261,10 +261,29 @@ public class FoodNutritionServiceImpl extends ServiceImpl<FoodNutritionMapper, F
 
     private FoodNutritionNeedsDto calculateFoodNutritionNeeds(BigDecimal calories) {
         FoodNutritionNeedsDto foodNutritionNeedsDto = new FoodNutritionNeedsDto();
-        foodNutritionNeedsDto.setCal(calories.setScale(0, RoundingMode.HALF_UP).intValue());
-        foodNutritionNeedsDto.setCarb(calories.multiply(new BigDecimal("0.55").divide(new BigDecimal(4))).setScale(0,RoundingMode.HALF_UP).intValue());
-        foodNutritionNeedsDto.setProtein(calories.multiply(new BigDecimal("0.15").divide(new BigDecimal(4))).setScale(0,RoundingMode.HALF_UP).intValue());
-        foodNutritionNeedsDto.setFat(calories.multiply(new BigDecimal("0.3").divide(new BigDecimal(9))).setScale(0,RoundingMode.HALF_UP).intValue());
+
+        foodNutritionNeedsDto.setCal(
+                calories.setScale(0, RoundingMode.HALF_UP).intValue()
+        );
+
+        foodNutritionNeedsDto.setCarb(
+                calories.multiply(new BigDecimal("0.55"))
+                        .divide(new BigDecimal("4"), 0, RoundingMode.HALF_UP)
+                        .intValue()
+        );
+
+        foodNutritionNeedsDto.setProtein(
+                calories.multiply(new BigDecimal("0.15"))
+                        .divide(new BigDecimal("4"), 0, RoundingMode.HALF_UP)
+                        .intValue()
+        );
+
+        foodNutritionNeedsDto.setFat(
+                calories.multiply(new BigDecimal("0.3"))
+                        .divide(new BigDecimal("9"), 0, RoundingMode.HALF_UP)
+                        .intValue()
+        );
+
         return foodNutritionNeedsDto;
     }
 
