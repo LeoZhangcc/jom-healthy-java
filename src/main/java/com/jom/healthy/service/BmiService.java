@@ -31,8 +31,12 @@ public class BmiService {
 
     public int calculateAgeInMonths(String birthDateStr) {
         try {
-            // 1. 将字符串解析为 Java 的本地日期对象
-            LocalDate birthDate = LocalDate.parse(birthDateStr);
+            // 👉 核心修改：将前端可能传来的斜杠 "/" 全部替换为标准破折号 "-"
+            // 这样无论前端传 "2018/01/01" 还是 "2018-01-01"，都会被格式化为 "2018-01-01"
+            String normalizedDateStr = birthDateStr.replace("/", "-");
+
+            // 1. 将标准化后的字符串解析为 Java 的本地日期对象
+            LocalDate birthDate = LocalDate.parse(normalizedDateStr);
 
             // 2. 获取服务器当前的绝对精确时间
             LocalDate today = LocalDate.now();
@@ -44,10 +48,9 @@ public class BmiService {
             return months <= 0 ? 0 : (int) months;
 
         } catch (DateTimeParseException e) {
-            // 防呆处理：如果前端乱传日期格式（比如传了 "hello"），统一当作格式错误
-            throw new IllegalArgumentException("Date format is incorrect, please use YYYY-MM-DD");
+            // 防呆处理：如果前端乱传日期格式，统一当作格式错误
+            throw new IllegalArgumentException("Date format is incorrect, please use YYYY-MM-DD or YYYY/MM/DD");
         }
-
     }
 
     public String evaluateChildBmi(double heightCm, double weightKg, String birthDateStr, int gender) {
@@ -76,11 +79,9 @@ public class BmiService {
         // 注意：这里格式化一下用户的 BMI，保留两位小数更好看
         String prefix = String.format("Your BMI is %.2f. Assessment results:", currentBmi);
 
-        if (currentBmi > standard.getSdPos2()) {
-            return prefix + "Obesity - It is recommended to seek intervention from a nutritionist, strictly control high-sugar and high-fat diets, and increase daily exercise.";
-        } else if (currentBmi > standard.getSdPos1()) {
+        if (currentBmi > standard.getSdPos1()) {
             return prefix + "Overweight - It is recommended to reduce snacks and sugary drinks (such as Milo) and cultivate a regular outdoor activity habit.";
-        } else if (currentBmi < standard.getSdNeg2()) {
+        } else if (currentBmi > standard.getSdNeg1()) {
             return prefix + "Underweight - It is recommended to increase dietary energy density and ensure adequate intake of protein and healthy fats.";
         } else {
             return prefix + "Healthy - Perfect! Please continue to maintain the good Malaysian \"Suku-Suku Separuh\" healthy eating habits!";
