@@ -1,5 +1,6 @@
 package com.jom.healthy.util;
 
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Locale;
@@ -16,8 +17,8 @@ public class MeasureToGramConverter {
             return BigDecimal.ZERO;
         }
 
-        String raw = measure.trim();
-        String text = normalizeText(raw);
+        String text = normalizeText(measure);
+
         String ingredient = normalizeText(
                 normalizedName != null && !normalizedName.trim().isEmpty()
                         ? normalizedName
@@ -28,43 +29,36 @@ public class MeasureToGramConverter {
             return BigDecimal.ZERO;
         }
 
-        // 1. 处理 "2 x 400g"、"2 (460g)"、"1 x 300ml"
         BigDecimal multiPack = parseMultiPack(text);
         if (multiPack.compareTo(BigDecimal.ZERO) > 0) {
             return multiPack;
         }
 
-        // 2. 优先解析括号中的 gram，例如 "8 ounces (230 grams)"
         BigDecimal gramInBracket = parseGramInBracket(text);
         if (gramInBracket.compareTo(BigDecimal.ZERO) > 0) {
             return gramInBracket;
         }
 
-        // 3. 处理 "175g/6oz" 这种，优先取 g
         BigDecimal directMetric = parseDirectMetric(text);
         if (directMetric.compareTo(BigDecimal.ZERO) > 0) {
             return directMetric;
         }
 
-        // 4. 处理 imperial 单位：lb / pound / oz / ounce / pint / quart
         BigDecimal imperial = parseImperial(text);
         if (imperial.compareTo(BigDecimal.ZERO) > 0) {
             return imperial;
         }
 
-        // 5. 处理 cup / tbsp / tsp
         BigDecimal spoonCup = parseSpoonCup(text, ingredient);
         if (spoonCup.compareTo(BigDecimal.ZERO) > 0) {
             return spoonCup;
         }
 
-        // 6. 处理 clove / slice / piece / can / packet / jar / bottle / bunch / handful 等
         BigDecimal itemBased = parseItemBased(text, ingredient);
         if (itemBased.compareTo(BigDecimal.ZERO) > 0) {
             return itemBased;
         }
 
-        // 7. 纯数字，例如 "1", "2", "12"
         BigDecimal plainNumber = parsePlainNumber(text, ingredient);
         if (plainNumber.compareTo(BigDecimal.ZERO) > 0) {
             return plainNumber;
@@ -84,23 +78,35 @@ public class MeasureToGramConverter {
                 .replace("¾", "3/4")
                 .replace("⅓", "1/3")
                 .replace("⅔", "2/3")
+                .replace("⅛", "1/8")
+                .replace("⅜", "3/8")
+                .replace("⅝", "5/8")
+                .replace("⅞", "7/8")
                 .replace("–", "-")
                 .replace("—", "-")
                 .replace(",", " ")
+                .replace("(", " (")
+                .replace(")", ") ")
                 .replaceAll("\\s+", " ")
                 .trim();
     }
 
     private static boolean isNonWeightMeasure(String text) {
+        if (text == null || text.trim().isEmpty()) {
+            return true;
+        }
+
         return text.contains("to serve")
                 || text.contains("to taste")
                 || text.contains("for brushing")
                 || text.contains("for frying")
                 || text.contains("for greasing")
+                || text.contains("to glaze")
                 || text.contains("garnish")
                 || text.contains("dusting")
                 || text.contains("sprinkling")
                 || text.contains("sprinking")
+                || text.contains("spinkling")
                 || text.contains("topping")
                 || text.contains("as required")
                 || text.equals("white")
@@ -114,17 +120,24 @@ public class MeasureToGramConverter {
                 || text.equals("steamed")
                 || text.equals("shaved")
                 || text.equals("fry")
-                || text.equals("top");
+                || text.equals("top")
+                || text.equals("chopped");
     }
 
     /**
-     * 2 x 400g tins -> 800g
+     * Examples:
      * 2 x 400g -> 800g
+     * 2 x 400g tins -> 800g
      * 1 x 300ml -> 300g
      * 2 (460g) -> 920g
+     * 3 400g cans -> 1200g
      */
     private static BigDecimal parseMultiPack(String text) {
-        Pattern p1 = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*x\\s*(\\d+(?:\\.\\d+)?)\\s*(g|gram|grams|ml|milliliter|milliliters|l|litre|liter|litres|liters)");
+        Pattern p1 = Pattern.compile(
+                "(\\d+(?:\\.\\d+)?)\\s*x\\s*" +
+                        "(\\d+(?:\\.\\d+)?)\\s*" +
+                        "(kg|grams|gram|g|milliliters|milliliter|ml|litres|liters|litre|liter|l)\\b"
+        );
         Matcher m1 = p1.matcher(text);
         if (m1.find()) {
             BigDecimal count = new BigDecimal(m1.group(1));
@@ -133,7 +146,9 @@ public class MeasureToGramConverter {
             return count.multiply(convertUnitToGram(value, unit)).setScale(2, RoundingMode.HALF_UP);
         }
 
-        Pattern p2 = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*g\\s*\\)");
+        Pattern p2 = Pattern.compile(
+                "(\\d+(?:\\.\\d+)?)\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*g\\s*\\)"
+        );
         Matcher m2 = p2.matcher(text);
         if (m2.find()) {
             BigDecimal count = new BigDecimal(m2.group(1));
@@ -141,39 +156,69 @@ public class MeasureToGramConverter {
             return count.multiply(value).setScale(2, RoundingMode.HALF_UP);
         }
 
+        Pattern p3 = Pattern.compile(
+                "(\\d+(?:\\.\\d+)?)\\s+(\\d+(?:\\.\\d+)?)\\s*" +
+                        "(kg|grams|gram|g|milliliters|milliliter|ml|litres|liters|litre|liter|l)\\b"
+        );
+        Matcher m3 = p3.matcher(text);
+        if (m3.find()) {
+            BigDecimal count = new BigDecimal(m3.group(1));
+            BigDecimal value = new BigDecimal(m3.group(2));
+            String unit = m3.group(3);
+            return count.multiply(convertUnitToGram(value, unit)).setScale(2, RoundingMode.HALF_UP);
+        }
+
         return BigDecimal.ZERO;
     }
 
+    /**
+     * Example:
+     * 8 ounces (230 grams) -> 230g
+     * 6 tablespoons (85 grams) -> 85g
+     */
     private static BigDecimal parseGramInBracket(String text) {
-        Pattern p = Pattern.compile("\\((\\d+(?:\\.\\d+)?)\\s*(g|gram|grams)\\)");
+        Pattern p = Pattern.compile(
+                "\\((\\d+(?:\\.\\d+)?)\\s*(g|gram|grams)\\)"
+        );
         Matcher m = p.matcher(text);
+
         if (m.find()) {
             return new BigDecimal(m.group(1)).setScale(2, RoundingMode.HALF_UP);
         }
+
         return BigDecimal.ZERO;
     }
 
+    /**
+     * Examples:
+     * 800g
+     * 200 g
+     * 1.25kg
+     * 50 ml
+     * 1 L
+     *
+     * Important:
+     * Unit has word boundary. So "1 large" will NOT match "1 l".
+     */
     private static BigDecimal parseDirectMetric(String text) {
-        Pattern p = Pattern.compile("(\\d+(?:\\.\\d+)?(?:\\s+\\d+/\\d+)?|\\d+/\\d+)\\s*(kg|g|gram|grams|ml|milliliter|milliliters|l|litre|liter|litres|liters)");
+        Pattern p = Pattern.compile(
+                "(\\d+(?:\\.\\d+)?(?:\\s+\\d+/\\d+)?|\\d+/\\d+)\\s*" +
+                        "(kg|grams|gram|g|milliliters|milliliter|ml|litres|liters|litre|liter|l)\\b"
+        );
+
         Matcher m = p.matcher(text);
+
         if (m.find()) {
             BigDecimal value = parseMixedNumber(m.group(1));
             String unit = m.group(2);
             return convertUnitToGram(value, unit).setScale(2, RoundingMode.HALF_UP);
         }
 
-        // 处理 "200 g" 这种
-        Pattern p2 = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s+g\\b");
-        Matcher m2 = p2.matcher(text);
-        if (m2.find()) {
-            return new BigDecimal(m2.group(1)).setScale(2, RoundingMode.HALF_UP);
-        }
-
         return BigDecimal.ZERO;
     }
 
     private static BigDecimal convertUnitToGram(BigDecimal value, String unit) {
-        if (unit == null) {
+        if (value == null || unit == null) {
             return BigDecimal.ZERO;
         }
 
@@ -185,22 +230,40 @@ public class MeasureToGramConverter {
             return value;
         }
 
-        // 默认水密度近似，ml ≈ g。油/酱料会有误差，但用于估算可接受
-        if (unit.equals("ml") || unit.equals("milliliter") || unit.equals("milliliters")) {
+        if (unit.equals("ml")
+                || unit.equals("milliliter")
+                || unit.equals("milliliters")) {
             return value;
         }
 
-        if (unit.equals("l") || unit.equals("litre") || unit.equals("liter")
-                || unit.equals("litres") || unit.equals("liters")) {
+        if (unit.equals("l")
+                || unit.equals("litre")
+                || unit.equals("liter")
+                || unit.equals("litres")
+                || unit.equals("liters")) {
             return value.multiply(new BigDecimal("1000"));
         }
 
         return BigDecimal.ZERO;
     }
 
+    /**
+     * Examples:
+     * 1 lb
+     * 2 Lbs
+     * 8 oz
+     * 16 ounces
+     * 2 pint
+     * 4 qt
+     */
     private static BigDecimal parseImperial(String text) {
-        Pattern p = Pattern.compile("(\\d+(?:\\.\\d+)?(?:\\s+\\d+/\\d+)?|\\d+/\\d+)\\s*(lb|lbs|pound|pounds|oz|ounce|ounces|pint|pints|quart|quarts|qt)");
+        Pattern p = Pattern.compile(
+                "(\\d+(?:\\.\\d+)?(?:\\s+\\d+/\\d+)?|\\d+/\\d+)\\s*" +
+                        "(lb|lbs|pound|pounds|oz|ounce|ounces|pint|pints|quart|quarts|qt)\\b"
+        );
+
         Matcher m = p.matcher(text);
+
         if (m.find()) {
             BigDecimal value = parseMixedNumber(m.group(1));
             String unit = m.group(2);
@@ -225,30 +288,64 @@ public class MeasureToGramConverter {
         return BigDecimal.ZERO;
     }
 
+    /**
+     * Examples:
+     * 1 tablespoon
+     * 3 tablespoons
+     * 1 tblsp
+     * 1 tbsp
+     * 1 tsp
+     * 3 Cups
+     */
     private static BigDecimal parseSpoonCup(String text, String ingredient) {
         BigDecimal quantity = extractFirstNumber(text);
+
         if (quantity.compareTo(BigDecimal.ZERO) <= 0) {
-            return BigDecimal.ZERO;
+            quantity = BigDecimal.ONE;
         }
 
-        if (text.contains("tablespoon") || text.contains("tbsp") || text.contains("tblsp")
-                || text.contains("tbls") || text.contains("tbs") || text.contains("tbsp")) {
+        if (text.contains("tablespoon")
+                || text.contains("tablespoons")
+                || text.contains("tbsp")
+                || text.contains("tblsp")
+                || text.contains("tbls")
+                || text.contains("tbs")
+                || text.contains("tbs.")) {
             return quantity.multiply(gramsPerTablespoon(ingredient)).setScale(2, RoundingMode.HALF_UP);
         }
 
-        if (text.contains("teaspoon") || text.contains("tsp")) {
+        if (text.contains("teaspoon")
+                || text.contains("teaspoons")
+                || text.contains("tsp")
+                || text.contains("tsp.")) {
             return quantity.multiply(gramsPerTeaspoon(ingredient)).setScale(2, RoundingMode.HALF_UP);
         }
 
-        if (text.contains("cup") || text.contains("cups")) {
+        if (text.contains("cup")
+                || text.contains("cups")) {
             return quantity.multiply(gramsPerCup(ingredient)).setScale(2, RoundingMode.HALF_UP);
         }
 
         return BigDecimal.ZERO;
     }
 
+    /**
+     * Examples:
+     * 1 large
+     * 1 medium
+     * 2 small
+     * 4 cloves
+     * 1 slice
+     * 2 pieces
+     * 1 can
+     * 1 jar
+     * 1 packet
+     * handful
+     * pinch
+     */
     private static BigDecimal parseItemBased(String text, String ingredient) {
         BigDecimal quantity = extractFirstNumber(text);
+
         if (quantity.compareTo(BigDecimal.ZERO) <= 0) {
             quantity = BigDecimal.ONE;
         }
@@ -281,6 +378,26 @@ public class MeasureToGramConverter {
             return quantity.multiply(gramsPerPiece(ingredient)).setScale(2, RoundingMode.HALF_UP);
         }
 
+        if (text.contains("stick") || text.contains("sticks")) {
+            return quantity.multiply(gramsPerStick(ingredient)).setScale(2, RoundingMode.HALF_UP);
+        }
+
+        if (text.contains("fillet") || text.contains("fillets")) {
+            return quantity.multiply(new BigDecimal("120")).setScale(2, RoundingMode.HALF_UP);
+        }
+
+        if (text.contains("yolk") || text.contains("yolkes")) {
+            return quantity.multiply(new BigDecimal("18")).setScale(2, RoundingMode.HALF_UP);
+        }
+
+        if (text.contains("tail")) {
+            return quantity.multiply(new BigDecimal("150")).setScale(2, RoundingMode.HALF_UP);
+        }
+
+        if (text.contains("pod") || text.contains("pods")) {
+            return quantity.multiply(new BigDecimal("2")).setScale(2, RoundingMode.HALF_UP);
+        }
+
         if (text.contains("medium")) {
             return quantity.multiply(gramsPerSize(ingredient, "medium")).setScale(2, RoundingMode.HALF_UP);
         }
@@ -293,7 +410,7 @@ public class MeasureToGramConverter {
             return quantity.multiply(gramsPerSize(ingredient, "small")).setScale(2, RoundingMode.HALF_UP);
         }
 
-        if (text.contains("can") || text.contains("tin")) {
+        if (text.contains("can") || text.contains("cans") || text.contains("tin") || text.contains("tins")) {
             return quantity.multiply(new BigDecimal("400")).setScale(2, RoundingMode.HALF_UP);
         }
 
@@ -301,7 +418,7 @@ public class MeasureToGramConverter {
             return quantity.multiply(new BigDecimal("350")).setScale(2, RoundingMode.HALF_UP);
         }
 
-        if (text.contains("packet") || text.contains("pack") || text.contains("package")) {
+        if (text.contains("packet") || text.contains("pack") || text.contains("package") || text.contains("bag")) {
             return quantity.multiply(new BigDecimal("250")).setScale(2, RoundingMode.HALF_UP);
         }
 
@@ -329,9 +446,34 @@ public class MeasureToGramConverter {
             return quantity.multiply(gramsPerHeadOrBulb(ingredient)).setScale(2, RoundingMode.HALF_UP);
         }
 
+        if (text.contains("knob") || text.contains("knobs")) {
+            return quantity.multiply(new BigDecimal("15")).setScale(2, RoundingMode.HALF_UP);
+        }
+
+        if (text.contains("thumb sized") || text.contains("thumb-sized")) {
+            return quantity.multiply(new BigDecimal("20")).setScale(2, RoundingMode.HALF_UP);
+        }
+
+        if (text.contains("inch")) {
+            return quantity.multiply(new BigDecimal("15")).setScale(2, RoundingMode.HALF_UP);
+        }
+
+        if (text.contains("cm piece") || text.contains("cm finely")) {
+            return quantity.multiply(new BigDecimal("10")).setScale(2, RoundingMode.HALF_UP);
+        }
+
         return BigDecimal.ZERO;
     }
 
+    /**
+     * Pure number:
+     * 1
+     * 2
+     * 12
+     * 0.5
+     *
+     * Use ingredient type to estimate.
+     */
     private static BigDecimal parsePlainNumber(String text, String ingredient) {
         if (!text.matches("\\d+(?:\\.\\d+)?|\\d+/\\d+")) {
             return BigDecimal.ZERO;
@@ -363,6 +505,18 @@ public class MeasureToGramConverter {
             return quantity.multiply(new BigDecimal("150")).setScale(2, RoundingMode.HALF_UP);
         }
 
+        if (ingredient.contains("banana")) {
+            return quantity.multiply(new BigDecimal("118")).setScale(2, RoundingMode.HALF_UP);
+        }
+
+        if (ingredient.contains("apple")) {
+            return quantity.multiply(new BigDecimal("180")).setScale(2, RoundingMode.HALF_UP);
+        }
+
+        if (ingredient.contains("carrot")) {
+            return quantity.multiply(new BigDecimal("60")).setScale(2, RoundingMode.HALF_UP);
+        }
+
         return BigDecimal.ZERO;
     }
 
@@ -376,9 +530,20 @@ public class MeasureToGramConverter {
         if (ingredient.contains("sauce")) return new BigDecimal("15");
         if (ingredient.contains("cream")) return new BigDecimal("15");
         if (ingredient.contains("milk")) return new BigDecimal("15");
+        if (ingredient.contains("yoghurt") || ingredient.contains("yogurt")) return new BigDecimal("15");
+        if (ingredient.contains("honey")) return new BigDecimal("21");
+        if (ingredient.contains("syrup")) return new BigDecimal("20");
+        if (ingredient.contains("paste")) return new BigDecimal("15");
         if (ingredient.contains("powder")) return new BigDecimal("8");
-        if (ingredient.contains("spice") || ingredient.contains("paprika") || ingredient.contains("cumin")
-                || ingredient.contains("turmeric") || ingredient.contains("cinnamon")) return new BigDecimal("7");
+        if (ingredient.contains("spice")
+                || ingredient.contains("paprika")
+                || ingredient.contains("cumin")
+                || ingredient.contains("turmeric")
+                || ingredient.contains("cinnamon")
+                || ingredient.contains("chilli")
+                || ingredient.contains("chili")) {
+            return new BigDecimal("7");
+        }
         return new BigDecimal("15");
     }
 
@@ -386,9 +551,19 @@ public class MeasureToGramConverter {
         if (ingredient.contains("oil")) return new BigDecimal("4.5");
         if (ingredient.contains("salt")) return new BigDecimal("6");
         if (ingredient.contains("sugar")) return new BigDecimal("4");
+        if (ingredient.contains("honey")) return new BigDecimal("7");
+        if (ingredient.contains("syrup")) return new BigDecimal("7");
+        if (ingredient.contains("paste")) return new BigDecimal("5");
         if (ingredient.contains("powder")) return new BigDecimal("3");
-        if (ingredient.contains("spice") || ingredient.contains("paprika") || ingredient.contains("cumin")
-                || ingredient.contains("turmeric") || ingredient.contains("cinnamon")) return new BigDecimal("2.5");
+        if (ingredient.contains("spice")
+                || ingredient.contains("paprika")
+                || ingredient.contains("cumin")
+                || ingredient.contains("turmeric")
+                || ingredient.contains("cinnamon")
+                || ingredient.contains("chilli")
+                || ingredient.contains("chili")) {
+            return new BigDecimal("2.5");
+        }
         return new BigDecimal("5");
     }
 
@@ -396,16 +571,27 @@ public class MeasureToGramConverter {
         if (ingredient.contains("flour")) return new BigDecimal("120");
         if (ingredient.contains("sugar")) return new BigDecimal("200");
         if (ingredient.contains("rice")) return new BigDecimal("185");
-        if (ingredient.contains("milk") || ingredient.contains("water") || ingredient.contains("stock")) return new BigDecimal("240");
+        if (ingredient.contains("milk")
+                || ingredient.contains("water")
+                || ingredient.contains("stock")
+                || ingredient.contains("juice")) {
+            return new BigDecimal("240");
+        }
         if (ingredient.contains("oil")) return new BigDecimal("216");
         if (ingredient.contains("cheese")) return new BigDecimal("110");
         if (ingredient.contains("cream")) return new BigDecimal("240");
+        if (ingredient.contains("yoghurt") || ingredient.contains("yogurt")) return new BigDecimal("245");
+        if (ingredient.contains("oat")) return new BigDecimal("90");
+        if (ingredient.contains("beans")) return new BigDecimal("170");
+        if (ingredient.contains("lentil")) return new BigDecimal("190");
         if (ingredient.contains("chopped")) return new BigDecimal("150");
         return new BigDecimal("240");
     }
 
     private static BigDecimal gramsPerClove(String ingredient) {
-        if (ingredient.contains("garlic")) return new BigDecimal("3");
+        if (ingredient.contains("garlic")) {
+            return new BigDecimal("3");
+        }
         return new BigDecimal("3");
     }
 
@@ -414,6 +600,8 @@ public class MeasureToGramConverter {
         if (ingredient.contains("bacon")) return new BigDecimal("25");
         if (ingredient.contains("cheese")) return new BigDecimal("20");
         if (ingredient.contains("ham")) return new BigDecimal("25");
+        if (ingredient.contains("cake")) return new BigDecimal("80");
+        if (ingredient.contains("meat")) return new BigDecimal("80");
         return new BigDecimal("30");
     }
 
@@ -421,6 +609,15 @@ public class MeasureToGramConverter {
         if (ingredient.contains("chicken")) return new BigDecimal("100");
         if (ingredient.contains("fish")) return new BigDecimal("120");
         if (ingredient.contains("egg")) return new BigDecimal("50");
+        if (ingredient.contains("bread")) return new BigDecimal("30");
+        if (ingredient.contains("fruit")) return new BigDecimal("100");
+        return new BigDecimal("50");
+    }
+
+    private static BigDecimal gramsPerStick(String ingredient) {
+        if (ingredient.contains("butter")) return new BigDecimal("113");
+        if (ingredient.contains("celery")) return new BigDecimal("40");
+        if (ingredient.contains("cinnamon")) return new BigDecimal("3");
         return new BigDecimal("50");
     }
 
@@ -445,6 +642,14 @@ public class MeasureToGramConverter {
             base = new BigDecimal("118");
         } else if (ingredient.contains("lemon") || ingredient.contains("lime")) {
             base = new BigDecimal("60");
+        } else if (ingredient.contains("avocado")) {
+            base = new BigDecimal("150");
+        } else if (ingredient.contains("cucumber")) {
+            base = new BigDecimal("200");
+        } else if (ingredient.contains("aubergine") || ingredient.contains("eggplant")) {
+            base = new BigDecimal("300");
+        } else if (ingredient.contains("courgette") || ingredient.contains("zucchini")) {
+            base = new BigDecimal("200");
         } else {
             base = new BigDecimal("100");
         }
@@ -466,12 +671,17 @@ public class MeasureToGramConverter {
         if (ingredient.contains("lettuce")) return new BigDecimal("600");
         if (ingredient.contains("cauliflower")) return new BigDecimal("600");
         if (ingredient.contains("broccoli")) return new BigDecimal("500");
+        if (ingredient.contains("onion")) return new BigDecimal("110");
         return new BigDecimal("500");
     }
 
     private static BigDecimal extractFirstNumber(String text) {
-        Pattern p = Pattern.compile("(\\d+(?:\\.\\d+)?(?:\\s+\\d+/\\d+)?|\\d+/\\d+)");
+        Pattern p = Pattern.compile(
+                "(\\d+(?:\\.\\d+)?(?:\\s+\\d+/\\d+)?|\\d+/\\d+)"
+        );
+
         Matcher m = p.matcher(text);
+
         if (m.find()) {
             return parseMixedNumber(m.group(1));
         }
@@ -502,6 +712,7 @@ public class MeasureToGramConverter {
 
     private static BigDecimal parseFraction(String value) {
         String[] parts = value.split("/");
+
         if (parts.length != 2) {
             return BigDecimal.ZERO;
         }
@@ -516,3 +727,4 @@ public class MeasureToGramConverter {
         return numerator.divide(denominator, 6, RoundingMode.HALF_UP);
     }
 }
+
