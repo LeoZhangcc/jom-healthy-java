@@ -155,6 +155,15 @@ public class AiMealPlanService {
         prompt.append("5. Make meals suitable for children.\n");
         prompt.append("6. The total macros should be reasonably close to the nutrition targets.\n\n");
 
+        prompt.append("Multilingual meal field requirements:\n");
+        prompt.append("1. Every meal must include English, Simplified Chinese, and Malay versions of the main display fields.\n");
+        prompt.append("2. strMeal should be English. strMealEn must equal the English name. strMealCn must be Simplified Chinese. strMealMs must be Malay.\n");
+        prompt.append("3. strCategory should be English. strCategoryEn must equal the English category. strCategoryCn must be Simplified Chinese. strCategoryMs must be Malay.\n");
+        prompt.append("4. strArea should be English. strAreaEn must equal the English area/cuisine. strAreaCn must be Simplified Chinese. strAreaMs must be Malay.\n");
+        prompt.append("5. strInstructions should be English. strInstructionsEn must equal the English cooking instructions. strInstructionsCn must be Simplified Chinese. strInstructionsMs must be Malay.\n");
+        prompt.append("6. Do not leave strMealCn, strMealMs, strCategoryCn, strCategoryMs, strAreaCn, strAreaMs, strInstructionsCn, or strInstructionsMs empty.\n");
+        prompt.append("7. Keep translated names natural and short for app UI display.\n\n");
+
         prompt.append("URL requirements:\n");
         prompt.append("1. Do not invent fake URLs.\n");
         prompt.append("2. Do not use example.com.\n");
@@ -173,13 +182,36 @@ public class AiMealPlanService {
         prompt.append("14. If no direct video is known, use the YouTube search URL format.\n");
         prompt.append("15. strMealThumb can be empty, but strYoutube must be a valid YouTube search URL or a verified direct YouTube video URL.\n\n");
 
+        prompt.append("Meal icon requirements:\n");
+        prompt.append("1. Every meal must include mealIconEmoji, mealIconName, and mealIconPrompt.\n");
+        prompt.append("2. mealIconEmoji must be a food emoji that matches the recipe.\n");
+        prompt.append("3. Use specific emojis when possible, for example: 🍚 rice, 🍛 curry or mixed rice, 🍜 noodles, 🍲 soup, 🥗 salad, 🥪 sandwich or toast, 🍗 chicken, 🐟 fish, 🥚 eggs, 🥣 yogurt/oats/porridge, 🍌 banana, 🍎 fruit, 🥘 stew, 🌮 wrap, 🍝 pasta, 🥞 pancakes.\n");
+        prompt.append("4. mealIconName should be a short English keyword like rice, rice-bowl, curry, noodle, soup, salad, sandwich, chicken, fish, egg, fruit, porridge, pasta.\n");
+        prompt.append("5. mealIconPrompt should describe a cute flat food icon matching the recipe, app illustration style, white background.\n");
+        prompt.append("6. If strMealThumb is empty, mealIconEmoji is required and should not be empty.\n\n");
+
         prompt.append("Each meal must include:\n");
         prompt.append("- idMeal\n");
         prompt.append("- strMeal\n");
+        prompt.append("- strMealEn\n");
+        prompt.append("- strMealCn\n");
+        prompt.append("- strMealMs\n");
         prompt.append("- strCategory\n");
+        prompt.append("- strCategoryEn\n");
+        prompt.append("- strCategoryCn\n");
+        prompt.append("- strCategoryMs\n");
         prompt.append("- strArea\n");
+        prompt.append("- strAreaEn\n");
+        prompt.append("- strAreaCn\n");
+        prompt.append("- strAreaMs\n");
         prompt.append("- strInstructions\n");
+        prompt.append("- strInstructionsEn\n");
+        prompt.append("- strInstructionsCn\n");
+        prompt.append("- strInstructionsMs\n");
         prompt.append("- strMealThumb\n");
+        prompt.append("- mealIconEmoji\n");
+        prompt.append("- mealIconName\n");
+        prompt.append("- mealIconPrompt\n");
         prompt.append("- strYoutube\n");
         prompt.append("- totalEnergyKcal\n");
         prompt.append("- totalProteinG\n");
@@ -212,7 +244,11 @@ public class AiMealPlanService {
         prompt.append("9. Use realistic nutrition estimates. Do not make all values zero.\n");
         prompt.append("10. For strMealThumb, return empty string if you cannot provide a real working image URL.\n");
         prompt.append("11. For strYoutube, prefer a valid YouTube search URL using the exact recipe name.\n");
-        prompt.append("12. Example: if strMeal is \"Chicken Rice\", strYoutube should be \"https://www.youtube.com/results?search_query=Chicken+Rice+tutorial\".\n\n");
+        prompt.append("12. Example: if strMeal is \"Chicken Rice\", strYoutube should be \"https://www.youtube.com/results?search_query=Chicken+Rice+tutorial\".\n");
+        prompt.append("13. mealIconEmoji must be a valid emoji string and must not be empty.\n");
+        prompt.append("14. mealIconName and mealIconPrompt must not be empty.\n");
+        prompt.append("15. All multilingual fields ending with En, Cn, and Ms must be valid strings and must not be empty.\n");
+        prompt.append("16. Use Simplified Chinese for fields ending with Cn and Malay for fields ending with Ms.\n\n");
 
         prompt.append("Return exactly this JSON structure:\n");
         prompt.append("{\n");
@@ -220,10 +256,25 @@ public class AiMealPlanService {
         prompt.append("    \"breakfast\": {\n");
         prompt.append("      \"idMeal\": \"ai-breakfast-1\",\n");
         prompt.append("      \"strMeal\": \"Recipe name\",\n");
+        prompt.append("      \"strMealEn\": \"Recipe name\",\n");
+        prompt.append("      \"strMealCn\": \"食谱名称\",\n");
+        prompt.append("      \"strMealMs\": \"Nama resipi\",\n");
         prompt.append("      \"strCategory\": \"Breakfast\",\n");
+        prompt.append("      \"strCategoryEn\": \"Breakfast\",\n");
+        prompt.append("      \"strCategoryCn\": \"早餐\",\n");
+        prompt.append("      \"strCategoryMs\": \"Sarapan\",\n");
         prompt.append("      \"strArea\": \"Malaysian or International\",\n");
+        prompt.append("      \"strAreaEn\": \"Malaysian or International\",\n");
+        prompt.append("      \"strAreaCn\": \"马来西亚或国际风味\",\n");
+        prompt.append("      \"strAreaMs\": \"Malaysia atau Antarabangsa\",\n");
         prompt.append("      \"strInstructions\": \"Cooking instructions\",\n");
+        prompt.append("      \"strInstructionsEn\": \"Cooking instructions\",\n");
+        prompt.append("      \"strInstructionsCn\": \"烹饪步骤\",\n");
+        prompt.append("      \"strInstructionsMs\": \"Arahan memasak\",\n");
         prompt.append("      \"strMealThumb\": \"real image url or empty string\",\n");
+        prompt.append("      \"mealIconEmoji\": \"🍛\",\n");
+        prompt.append("      \"mealIconName\": \"rice-bowl\",\n");
+        prompt.append("      \"mealIconPrompt\": \"A cute flat food icon of this recipe, colorful, minimal, rounded, app illustration style, white background\",\n");
         prompt.append("      \"strYoutube\": \"https://www.youtube.com/results?search_query=Recipe+name+tutorial\",\n");
         prompt.append("      \"totalEnergyKcal\": 0,\n");
         prompt.append("      \"totalProteinG\": 0,\n");
@@ -276,6 +327,8 @@ public class AiMealPlanService {
             @SuppressWarnings("unchecked")
             Map<String, Object> result = objectMapper.readValue(text, Map.class);
 
+            ensureMealLanguageFields(result);
+            ensureMealIconFields(result);
             ensureYoutubeSearchLinks(result);
             sanitizeMealPlanUrls(result);
 
@@ -295,6 +348,8 @@ public class AiMealPlanService {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> result = objectMapper.readValue(extractedJson, Map.class);
 
+                ensureMealLanguageFields(result);
+                ensureMealIconFields(result);
                 ensureYoutubeSearchLinks(result);
                 sanitizeMealPlanUrls(result);
 
@@ -386,6 +441,133 @@ public class AiMealPlanService {
         }
 
         return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void ensureMealLanguageFields(Map<String, Object> result) {
+        if (result == null) {
+            return;
+        }
+
+        Object planObj = result.get("plan");
+
+        if (!(planObj instanceof Map)) {
+            return;
+        }
+
+        Map<String, Object> plan = (Map<String, Object>) planObj;
+
+        ensureMealLanguageField(plan.get("breakfast"));
+        ensureMealLanguageField(plan.get("lunch"));
+        ensureMealLanguageField(plan.get("dinner"));
+        ensureMealLanguageField(plan.get("snack"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void ensureMealLanguageField(Object mealObj) {
+        if (!(mealObj instanceof Map)) {
+            return;
+        }
+
+        Map<String, Object> meal = (Map<String, Object>) mealObj;
+
+        String mealName = stringValue(meal.get("strMeal"), stringValue(meal.get("name"), "Meal"));
+        String category = stringValue(meal.get("strCategory"), stringValue(meal.get("category"), "Meal"));
+        String area = stringValue(meal.get("strArea"), stringValue(meal.get("area"), "AI Recommended"));
+        String instructions = stringValue(meal.get("strInstructions"), stringValue(meal.get("instructions"), "Prepare ingredients, cook safely, and serve in an age-appropriate portion."));
+
+        putIfBlank(meal, "strMealEn", mealName);
+        putIfBlank(meal, "strMealCn", mealName);
+        putIfBlank(meal, "strMealMs", mealName);
+
+        putIfBlank(meal, "strCategoryEn", category);
+        putIfBlank(meal, "strCategoryCn", category);
+        putIfBlank(meal, "strCategoryMs", category);
+
+        putIfBlank(meal, "strAreaEn", area);
+        putIfBlank(meal, "strAreaCn", area);
+        putIfBlank(meal, "strAreaMs", area);
+
+        putIfBlank(meal, "strInstructionsEn", instructions);
+        putIfBlank(meal, "strInstructionsCn", instructions);
+        putIfBlank(meal, "strInstructionsMs", instructions);
+    }
+
+    private void putIfBlank(Map<String, Object> map, String key, String value) {
+        Object existing = map.get(key);
+
+        if (existing == null || String.valueOf(existing).trim().length() == 0) {
+            map.put(key, value);
+        }
+    }
+
+    private String stringValue(Object value, String fallback) {
+        if (value == null || String.valueOf(value).trim().length() == 0) {
+            return fallback;
+        }
+
+        return String.valueOf(value).trim();
+    }
+
+    @SuppressWarnings("unchecked")
+    private void ensureMealIconFields(Map<String, Object> result) {
+        if (result == null) {
+            return;
+        }
+
+        Object planObj = result.get("plan");
+
+        if (!(planObj instanceof Map)) {
+            return;
+        }
+
+        Map<String, Object> plan = (Map<String, Object>) planObj;
+
+        ensureMealIconField(plan.get("breakfast"));
+        ensureMealIconField(plan.get("lunch"));
+        ensureMealIconField(plan.get("dinner"));
+        ensureMealIconField(plan.get("snack"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void ensureMealIconField(Object mealObj) {
+        if (!(mealObj instanceof Map)) {
+            return;
+        }
+
+        Map<String, Object> meal = (Map<String, Object>) mealObj;
+
+        String mealName = meal.get("strMeal") == null
+                ? "meal"
+                : String.valueOf(meal.get("strMeal")).trim();
+
+        String category = meal.get("strCategory") == null
+                ? ""
+                : String.valueOf(meal.get("strCategory")).trim();
+
+        String emoji = meal.get("mealIconEmoji") == null
+                ? ""
+                : String.valueOf(meal.get("mealIconEmoji")).trim();
+
+        String iconName = meal.get("mealIconName") == null
+                ? ""
+                : String.valueOf(meal.get("mealIconName")).trim();
+
+        String iconPrompt = meal.get("mealIconPrompt") == null
+                ? ""
+                : String.valueOf(meal.get("mealIconPrompt")).trim();
+
+        if (emoji.length() == 0) {
+            meal.put("mealIconEmoji", guessMealEmoji(mealName, category));
+        }
+
+        if (iconName.length() == 0) {
+            meal.put("mealIconName", guessMealIconName(mealName, category));
+        }
+
+        if (iconPrompt.length() == 0) {
+            meal.put("mealIconPrompt", buildMealIconPrompt(mealName));
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -631,10 +813,25 @@ public class AiMealPlanService {
 
         meal.put("idMeal", id);
         meal.put("strMeal", name);
+        meal.put("strMealEn", name);
+        meal.put("strMealCn", fallbackMealNameCn(name));
+        meal.put("strMealMs", fallbackMealNameMs(name));
         meal.put("strCategory", category);
+        meal.put("strCategoryEn", category);
+        meal.put("strCategoryCn", fallbackCategoryCn(category));
+        meal.put("strCategoryMs", fallbackCategoryMs(category));
         meal.put("strArea", "AI Recommended");
+        meal.put("strAreaEn", "AI Recommended");
+        meal.put("strAreaCn", "AI 推荐");
+        meal.put("strAreaMs", "Cadangan AI");
         meal.put("strInstructions", "Prepare ingredients, cook safely, and serve in an age-appropriate portion.");
+        meal.put("strInstructionsEn", "Prepare ingredients, cook safely, and serve in an age-appropriate portion.");
+        meal.put("strInstructionsCn", "准备食材，安全烹饪，并按孩子年龄提供合适份量。");
+        meal.put("strInstructionsMs", "Sediakan bahan, masak dengan selamat, dan hidangkan mengikut saiz sesuai umur kanak-kanak.");
         meal.put("strMealThumb", "");
+        meal.put("mealIconEmoji", guessMealEmoji(name, category));
+        meal.put("mealIconName", guessMealIconName(name, category));
+        meal.put("mealIconPrompt", buildMealIconPrompt(name));
         meal.put("strYoutube", buildYoutubeSearchUrl(name));
         meal.put("totalEnergyKcal", kcal);
         meal.put("totalProteinG", protein);
@@ -685,6 +882,155 @@ public class AiMealPlanService {
         ingredient.put("fatG", fat);
 
         return ingredient;
+    }
+
+    private String fallbackMealNameCn(String name) {
+        String text = safeString(name, "").toLowerCase();
+
+        if (text.contains("scrambled eggs")) return "炒蛋配吐司";
+        if (text.contains("chicken rice")) return "鸡肉饭配蔬菜";
+        if (text.contains("fish soup")) return "鱼汤配米饭";
+        if (text.contains("yogurt")) return "酸奶配香蕉";
+
+        return safeString(name, "餐食");
+    }
+
+    private String fallbackMealNameMs(String name) {
+        String text = safeString(name, "").toLowerCase();
+
+        if (text.contains("scrambled eggs")) return "Telur hancur dengan roti bakar";
+        if (text.contains("chicken rice")) return "Nasi ayam dengan sayur";
+        if (text.contains("fish soup")) return "Sup ikan dengan nasi";
+        if (text.contains("yogurt")) return "Yogurt dengan pisang";
+
+        return safeString(name, "Hidangan");
+    }
+
+    private String fallbackCategoryCn(String category) {
+        String text = safeString(category, "").toLowerCase();
+
+        if (text.contains("breakfast")) return "早餐";
+        if (text.contains("lunch")) return "午餐";
+        if (text.contains("dinner")) return "晚餐";
+        if (text.contains("snack")) return "加餐";
+
+        return safeString(category, "餐食");
+    }
+
+    private String fallbackCategoryMs(String category) {
+        String text = safeString(category, "").toLowerCase();
+
+        if (text.contains("breakfast")) return "Sarapan";
+        if (text.contains("lunch")) return "Makan Tengah Hari";
+        if (text.contains("dinner")) return "Makan Malam";
+        if (text.contains("snack")) return "Snek";
+
+        return safeString(category, "Hidangan");
+    }
+
+    private String guessMealEmoji(String name, String category) {
+        String text = (safeString(name, "") + " " + safeString(category, "")).toLowerCase();
+
+        if (containsAny(text, "nasi lemak", "coconut rice")) return "🍛";
+        if (containsAny(text, "chicken rice", "rice bowl", "fried rice", "nasi", "rice")) return "🍚";
+        if (containsAny(text, "curry", "rendang", "laksa", "biryani", "briyani", "korma")) return "🍛";
+        if (containsAny(text, "noodle", "mee", "mie", "ramen", "udon", "vermicelli", "bee hoon", "kuey teow", "laksa")) return "🍜";
+        if (containsAny(text, "pasta", "spaghetti", "macaroni", "lasagna", "lasagne")) return "🍝";
+        if (containsAny(text, "soup", "porridge", "congee", "broth")) return "🍲";
+        if (containsAny(text, "stew", "hotpot", "claypot")) return "🥘";
+        if (containsAny(text, "salad", "vegetable bowl", "greens")) return "🥗";
+        if (containsAny(text, "sandwich", "toast", "bread", "burger", "wrap", "roti", "chapati", "tortilla")) return "🥪";
+        if (containsAny(text, "pancake", "waffle", "crepe")) return "🥞";
+        if (containsAny(text, "pizza")) return "🍕";
+        if (containsAny(text, "sushi", "maki")) return "🍣";
+        if (containsAny(text, "dumpling", "gyoza", "wonton")) return "🥟";
+        if (containsAny(text, "taco")) return "🌮";
+        if (containsAny(text, "burrito")) return "🌯";
+        if (containsAny(text, "chicken", "ayam", "drumstick", "wing")) return "🍗";
+        if (containsAny(text, "fish", "salmon", "tuna", "sardine", "ikan")) return "🐟";
+        if (containsAny(text, "shrimp", "prawn", "seafood")) return "🍤";
+        if (containsAny(text, "egg", "omelette", "scrambled")) return "🥚";
+        if (containsAny(text, "beef", "steak", "meatball")) return "🥩";
+        if (containsAny(text, "tofu", "tempeh", "bean", "lentil", "chickpea", "dal")) return "🫘";
+        if (containsAny(text, "cheese")) return "🧀";
+        if (containsAny(text, "milk")) return "🥛";
+        if (containsAny(text, "yogurt", "oat", "granola", "cereal", "muesli")) return "🥣";
+        if (containsAny(text, "banana")) return "🍌";
+        if (containsAny(text, "apple")) return "🍎";
+        if (containsAny(text, "orange", "tangerine")) return "🍊";
+        if (containsAny(text, "mango")) return "🥭";
+        if (containsAny(text, "pineapple")) return "🍍";
+        if (containsAny(text, "watermelon")) return "🍉";
+        if (containsAny(text, "strawberry", "berry", "blueberry")) return "🍓";
+        if (containsAny(text, "grape")) return "🍇";
+        if (containsAny(text, "avocado")) return "🥑";
+        if (containsAny(text, "carrot")) return "🥕";
+        if (containsAny(text, "corn")) return "🌽";
+        if (containsAny(text, "potato", "sweet potato")) return "🥔";
+        if (containsAny(text, "broccoli")) return "🥦";
+        if (containsAny(text, "tomato")) return "🍅";
+        if (containsAny(text, "mushroom")) return "🍄";
+        if (containsAny(text, "peanut", "nut", "almond", "cashew")) return "🥜";
+        if (containsAny(text, "cake", "muffin", "cupcake")) return "🧁";
+        if (containsAny(text, "cookie", "biscuit")) return "🍪";
+        if (containsAny(text, "smoothie", "juice")) return "🥤";
+        if (containsAny(text, "tea")) return "🍵";
+
+        return "🍽️";
+    }
+
+    private String guessMealIconName(String name, String category) {
+        String text = (safeString(name, "") + " " + safeString(category, "")).toLowerCase();
+
+        if (containsAny(text, "nasi lemak", "chicken rice", "fried rice", "rice bowl", "nasi", "rice")) return "rice";
+        if (containsAny(text, "curry", "rendang", "laksa", "biryani", "briyani", "korma")) return "curry";
+        if (containsAny(text, "noodle", "mee", "mie", "ramen", "udon", "vermicelli", "bee hoon", "kuey teow")) return "noodle";
+        if (containsAny(text, "pasta", "spaghetti", "macaroni", "lasagna", "lasagne")) return "pasta";
+        if (containsAny(text, "soup", "porridge", "congee", "broth")) return "soup";
+        if (containsAny(text, "stew", "hotpot", "claypot")) return "stew";
+        if (containsAny(text, "salad", "vegetable bowl", "greens")) return "salad";
+        if (containsAny(text, "sandwich", "toast", "bread", "burger", "wrap", "roti", "chapati", "tortilla")) return "sandwich";
+        if (containsAny(text, "pancake", "waffle", "crepe")) return "pancake";
+        if (containsAny(text, "pizza")) return "pizza";
+        if (containsAny(text, "sushi", "maki")) return "sushi";
+        if (containsAny(text, "dumpling", "gyoza", "wonton")) return "dumpling";
+        if (containsAny(text, "taco")) return "taco";
+        if (containsAny(text, "burrito")) return "burrito";
+        if (containsAny(text, "chicken", "ayam", "drumstick", "wing")) return "chicken";
+        if (containsAny(text, "fish", "salmon", "tuna", "sardine", "ikan")) return "fish";
+        if (containsAny(text, "shrimp", "prawn", "seafood")) return "seafood";
+        if (containsAny(text, "egg", "omelette", "scrambled")) return "egg";
+        if (containsAny(text, "beef", "steak", "meatball")) return "beef";
+        if (containsAny(text, "tofu", "tempeh", "bean", "lentil", "chickpea", "dal")) return "beans";
+        if (containsAny(text, "cheese")) return "cheese";
+        if (containsAny(text, "milk")) return "milk";
+        if (containsAny(text, "yogurt", "oat", "granola", "cereal", "muesli")) return "bowl";
+        if (containsAny(text, "banana", "apple", "orange", "mango", "pineapple", "watermelon", "strawberry", "berry", "grape", "fruit")) return "fruit";
+        if (containsAny(text, "vegetable", "carrot", "corn", "potato", "broccoli", "tomato", "mushroom")) return "vegetable";
+        if (containsAny(text, "cake", "muffin", "cupcake", "cookie", "biscuit")) return "snack";
+        if (containsAny(text, "smoothie", "juice", "tea")) return "drink";
+
+        return "meal";
+    }
+
+    private String buildMealIconPrompt(String mealName) {
+        return "A cute flat food icon of "
+                + safeString(mealName, "meal")
+                + ", colorful, minimal, rounded, app illustration style, white background";
+    }
+
+    private boolean containsAny(String text, String... keywords) {
+        if (text == null || keywords == null) {
+            return false;
+        }
+
+        for (String keyword : keywords) {
+            if (keyword != null && text.contains(keyword.toLowerCase())) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private String safeString(String value, String fallback) {
