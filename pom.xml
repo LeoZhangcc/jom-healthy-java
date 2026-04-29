@@ -24,7 +24,7 @@
         <jwt.version>0.9.1</jwt.version>
         <swagger.version>2.9.2</swagger.version>
         <swagger.annotations.version>1.5.22</swagger.annotations.version>
-        <aspectj.version>1.9.1</aspectj.version>
+        <aspectj.version>1.9.7</aspectj.version>
         <cdimascio.version>2.2.3</cdimascio.version>
     </properties>
 
@@ -55,6 +55,18 @@
             <artifactId>junit-jupiter</artifactId>
             <version>RELEASE</version>
             <scope>compile</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.ibeetl</groupId>
+            <artifactId>beetl</artifactId>
+            <version>2.9.3</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.velocity</groupId>
+            <artifactId>velocity-engine-core</artifactId>
+            <version>2.0</version>
         </dependency>
 
         <dependency>
@@ -167,6 +179,16 @@
                     <artifactId>swagger-models</artifactId>
                 </exclusion>
             </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>io.swagger</groupId>
+            <artifactId>swagger-annotations</artifactId>
+            <version>1.5.22</version>
+        </dependency>
+        <dependency>
+            <groupId>io.swagger</groupId>
+            <artifactId>swagger-models</artifactId>
+            <version>1.5.22</version>
         </dependency>
         <dependency>
             <groupId>io.springfox</groupId>

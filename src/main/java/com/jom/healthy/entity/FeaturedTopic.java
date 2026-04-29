@@ -5,26 +5,61 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("featured_topics") // 替换 @Table
+@TableName("featured_topics")
 public class FeaturedTopic {
 
-    @TableId(type = IdType.AUTO) // 替换 @Id 和 @GeneratedValue
+    @TableId(type = IdType.AUTO)
     private Long id;
 
-    private String title;
-
+    /**
+     * 分类：REPORT, DIET, SPORTS, HABIT
+     */
     private String category;
 
-    @TableField("image_url") // 对应数据库字段名
+    /**
+     * 适用健康标签：UNDERWEIGHT, HEALTHY, OVERWEIGHT
+     */
+    @TableField("health_tag")
+    private String healthTag;
+
+    @TableField("image_url")
     private String imageUrl;
-
-    private String summary;
-
-    private String content;
 
     @TableField("source_url")
     private String sourceUrl;
 
-    @TableField(value = "created_at", fill = FieldFill.INSERT) // MP 自动填充创建时间
+    // =================  标题三语  =================
+    @TableField("title_en")
+    private String titleEn;
+
+    @TableField("title_zh")
+    private String titleZh;
+
+    @TableField("title_ms")
+    private String titleMs;
+
+    // =================  摘要三语  =================
+    @TableField("summary_en")
+    private String summaryEn;
+
+    @TableField("summary_zh")
+    private String summaryZh;
+
+    @TableField("summary_ms")
+    private String summaryMs;
+
+    // =================  正文三语  =================
+    @TableField("content_en")
+    private String contentEn;
+
+    @TableField("content_zh")
+    private String contentZh;
+
+    @TableField("content_ms")
+    private String contentMs;
+
+    // =============================================
+
+    @TableField(value = "created_at", fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 }
