@@ -159,19 +159,21 @@ public class AiMealPlanService {
         prompt.append("3. Avoid vague names like Healthy Breakfast Bowl unless it is a well-known recipe.\n");
         prompt.append("4. Avoid allergies and dietary restrictions.\n");
         prompt.append("5. Make meals suitable for children.\n");
-        prompt.append("6. The total macros should be reasonably close to the nutrition targets, but must never exceed the hard limits below.\n\n");
+        prompt.append("6. The full-day macro totals should be almost equal to the daily targets after portion adjustment.\n\n");
 
-        prompt.append("Daily macro hard limit rules:\n");
+        prompt.append("Daily macro target matching rules:\n");
         prompt.append("1. targetCarbs = ").append(targetCarbs).append("g, targetProtein = ").append(targetProtein).append("g, targetFat = ").append(targetFat).append("g.\n");
-        prompt.append("2. The sum of totalCarbohydrateG from breakfast + lunch + dinner + snack must be <= targetCarbs.\n");
-        prompt.append("3. The sum of totalProteinG from breakfast + lunch + dinner + snack must be <= targetProtein.\n");
-        prompt.append("4. The sum of totalFatG from breakfast + lunch + dinner + snack must be <= targetFat.\n");
-        prompt.append("5. Do not exceed any target even if the user's meal preference asks for high-carb, high-protein, or high-fat food.\n");
-        prompt.append("6. If the first meal plan exceeds any target, reduce ingredient gramsEstimated and measure portions until all daily totals are within the limits.\n");
-        prompt.append("7. After portion adjustment, update every ingredient's gramsEstimated, measure, energyKcal, proteinG, carbohydrateG, fatG.\n");
-        prompt.append("8. After portion adjustment, update each meal's totalEnergyKcal, totalProteinG, totalCarbohydrateG, totalFatG so they equal the sum of its ingredients.\n");
-        prompt.append("9. Prefer daily totals around 85% to 100% of each target, but staying below the limits is more important than getting close.\n");
-        prompt.append("10. Return realistic child-sized portions. Do not use very large portions like 1000g banana or 500g rice.\n\n");
+        prompt.append("2. The sum of totalCarbohydrateG from breakfast + lunch + dinner + snack should be between 98% and 100% of targetCarbs, and must never exceed targetCarbs.\n");
+        prompt.append("3. The sum of totalProteinG from breakfast + lunch + dinner + snack should be between 98% and 100% of targetProtein, and must never exceed targetProtein.\n");
+        prompt.append("4. The sum of totalFatG from breakfast + lunch + dinner + snack should be between 98% and 100% of targetFat, and must never exceed targetFat.\n");
+        prompt.append("5. Do not intentionally make the plan too low. A plan that is far below the targets is incorrect.\n");
+        prompt.append("6. If any macro is too low, increase suitable ingredient gramsEstimated and measure portions, then recalculate all ingredient and meal totals.\n");
+        prompt.append("7. If any macro is too high, reduce suitable ingredient gramsEstimated and measure portions, then recalculate all ingredient and meal totals.\n");
+        prompt.append("8. Use carb-rich foods like rice, oats, bread, potato, pasta, fruit to adjust carbs. Use chicken, fish, egg, tofu, beef, beans, yogurt to adjust protein. Use oil, egg yolk, avocado, nuts, milk, yogurt, fish to adjust fat.\n");
+        prompt.append("9. After every portion adjustment, update every ingredient's gramsEstimated, measure, energyKcal, proteinG, carbohydrateG, fatG.\n");
+        prompt.append("10. After every portion adjustment, update each meal's totalEnergyKcal, totalProteinG, totalCarbohydrateG, totalFatG so they equal the sum of its ingredients.\n");
+        prompt.append("11. Return realistic child-sized portions. Do not use very large portions like 1000g banana or 500g rice.\n");
+        prompt.append("12. Prefer changing portion weights of existing ingredients instead of adding unusual ingredients.\n\n");
 
         prompt.append("Multilingual meal field requirements:\n");
         prompt.append("1. Every meal must include English, Simplified Chinese, and Malay versions of the main display fields.\n");
@@ -267,10 +269,10 @@ public class AiMealPlanService {
         prompt.append("14. mealIconName and mealIconPrompt must not be empty.\n");
         prompt.append("15. All multilingual fields ending with En, Cn, and Ms must be valid strings and must not be empty.\n");
         prompt.append("16. Use Simplified Chinese for fields ending with Cn and Malay for fields ending with Ms.\n");
-        prompt.append("17. Daily totalCarbohydrateG must be <= ").append(targetCarbs).append(".\n");
-        prompt.append("18. Daily totalProteinG must be <= ").append(targetProtein).append(".\n");
-        prompt.append("19. Daily totalFatG must be <= ").append(targetFat).append(".\n");
-        prompt.append("20. If daily totals exceed any limit, you must reduce ingredient weights and recalculate the affected meal totals before returning JSON.\n\n");
+        prompt.append("17. Daily totalCarbohydrateG should be between ").append(roundOne(targetCarbs * 0.98)).append(" and ").append(targetCarbs).append(".\n");
+        prompt.append("18. Daily totalProteinG should be between ").append(roundOne(targetProtein * 0.98)).append(" and ").append(targetProtein).append(".\n");
+        prompt.append("19. Daily totalFatG should be between ").append(roundOne(targetFat * 0.98)).append(" and ").append(targetFat).append(".\n");
+        prompt.append("20. If daily totals are below or above those ranges, you must adjust ingredient weights and recalculate the affected meal totals before returning JSON.\n\n");
 
         prompt.append("Return exactly this JSON structure:\n");
         prompt.append("{\n");
@@ -769,9 +771,71 @@ public class AiMealPlanService {
         double targetFat = normalizeTarget(request == null ? null : request.getTargetFat(), 28.0);
 
         String[] mealKeys = new String[] {"breakfast", "lunch", "dinner", "snack"};
-        double totalCarbs = 0.0;
-        double totalProtein = 0.0;
-        double totalFat = 0.0;
+        double[] before = recalculatePlanAndGetTotals(plan, mealKeys);
+
+        // The ideal result is close to the target, but still not above it.
+        // 99.5% gives a small rounding buffer while looking equal in the app UI.
+        double targetFillRatio = 0.995;
+        double maxRatio = 0.999;
+
+        // First, reduce if Gemini returned a plan that is over any target.
+        reducePlanIfOverTargets(plan, mealKeys, targetCarbs, targetProtein, targetFat, maxRatio);
+
+        // Then fill missing macros by increasing the most suitable existing ingredients.
+        // Repeat because increasing one macro can slightly affect the others.
+        for (int i = 0; i < 12; i++) {
+            reducePlanIfOverTargets(plan, mealKeys, targetCarbs, targetProtein, targetFat, maxRatio);
+
+            double[] totals = recalculatePlanAndGetTotals(plan, mealKeys);
+            int macroToFill = findMostMissingMacro(totals, targetCarbs, targetProtein, targetFat, targetFillRatio);
+
+            if (macroToFill < 0) {
+                break;
+            }
+
+            boolean changed = increaseDominantMacroIngredients(
+                    plan,
+                    mealKeys,
+                    macroToFill,
+                    targetCarbs,
+                    targetProtein,
+                    targetFat,
+                    targetFillRatio,
+                    maxRatio
+            );
+
+            if (!changed) {
+                break;
+            }
+        }
+
+        // Final safety pass: never let totals exceed the target after rounding.
+        reducePlanIfOverTargets(plan, mealKeys, targetCarbs, targetProtein, targetFat, maxRatio);
+
+        double[] after = recalculatePlanAndGetTotals(plan, mealKeys);
+
+        log.info(
+                "AI meal plan macros balanced. Before carbs/protein/fat: {}/{}/{}. Target: {}/{}/{}. After: {}/{}/{}",
+                roundOne(before[0]),
+                roundOne(before[1]),
+                roundOne(before[2]),
+                targetCarbs,
+                targetProtein,
+                targetFat,
+                roundOne(after[0]),
+                roundOne(after[1]),
+                roundOne(after[2])
+        );
+
+        return result;
+    }
+
+
+    @SuppressWarnings("unchecked")
+    private double[] recalculatePlanAndGetTotals(Map<String, Object> plan, String[] mealKeys) {
+        double carbs = 0.0;
+        double protein = 0.0;
+        double fat = 0.0;
 
         for (String key : mealKeys) {
             Object mealObj = plan.get(key);
@@ -783,35 +847,44 @@ public class AiMealPlanService {
             Map<String, Object> meal = (Map<String, Object>) mealObj;
             recalculateMealTotalsFromIngredients(meal);
 
-            totalCarbs += numberValue(meal.get("totalCarbohydrateG"));
-            totalProtein += numberValue(meal.get("totalProteinG"));
-            totalFat += numberValue(meal.get("totalFatG"));
+            carbs += numberValue(meal.get("totalCarbohydrateG"));
+            protein += numberValue(meal.get("totalProteinG"));
+            fat += numberValue(meal.get("totalFatG"));
         }
 
-        boolean exceedCarbs = totalCarbs > targetCarbs;
-        boolean exceedProtein = totalProtein > targetProtein;
-        boolean exceedFat = totalFat > targetFat;
+        return new double[] {carbs, protein, fat};
+    }
 
-        if (!exceedCarbs && !exceedProtein && !exceedFat) {
-            return result;
-        }
+    @SuppressWarnings("unchecked")
+    private void reducePlanIfOverTargets(
+            Map<String, Object> plan,
+            String[] mealKeys,
+            double targetCarbs,
+            double targetProtein,
+            double targetFat,
+            double maxRatio
+    ) {
+        double[] totals = recalculatePlanAndGetTotals(plan, mealKeys);
 
         double scale = 1.0;
 
-        if (exceedCarbs && totalCarbs > 0) {
-            scale = Math.min(scale, targetCarbs / totalCarbs);
+        if (totals[0] > targetCarbs && totals[0] > 0) {
+            scale = Math.min(scale, (targetCarbs * maxRatio) / totals[0]);
         }
 
-        if (exceedProtein && totalProtein > 0) {
-            scale = Math.min(scale, targetProtein / totalProtein);
+        if (totals[1] > targetProtein && totals[1] > 0) {
+            scale = Math.min(scale, (targetProtein * maxRatio) / totals[1]);
         }
 
-        if (exceedFat && totalFat > 0) {
-            scale = Math.min(scale, targetFat / totalFat);
+        if (totals[2] > targetFat && totals[2] > 0) {
+            scale = Math.min(scale, (targetFat * maxRatio) / totals[2]);
         }
 
-        // Keep a tiny safety buffer so rounding does not push the day total over the target.
-        scale = Math.max(0.05, Math.min(1.0, scale * 0.995));
+        if (scale >= 0.9999) {
+            return;
+        }
+
+        scale = Math.max(0.05, Math.min(1.0, scale));
 
         for (String key : mealKeys) {
             Object mealObj = plan.get(key);
@@ -820,10 +893,119 @@ public class AiMealPlanService {
                 scaleMealNutrition((Map<String, Object>) mealObj, scale);
             }
         }
+    }
 
-        double adjustedCarbs = 0.0;
-        double adjustedProtein = 0.0;
-        double adjustedFat = 0.0;
+    private int findMostMissingMacro(
+            double[] totals,
+            double targetCarbs,
+            double targetProtein,
+            double targetFat,
+            double targetFillRatio
+    ) {
+        double carbsRatio = targetCarbs > 0 ? totals[0] / targetCarbs : 1.0;
+        double proteinRatio = targetProtein > 0 ? totals[1] / targetProtein : 1.0;
+        double fatRatio = targetFat > 0 ? totals[2] / targetFat : 1.0;
+
+        int macroIndex = -1;
+        double lowestRatio = targetFillRatio;
+
+        if (carbsRatio < lowestRatio) {
+            lowestRatio = carbsRatio;
+            macroIndex = 0;
+        }
+
+        if (proteinRatio < lowestRatio) {
+            lowestRatio = proteinRatio;
+            macroIndex = 1;
+        }
+
+        if (fatRatio < lowestRatio) {
+            macroIndex = 2;
+        }
+
+        return macroIndex;
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean increaseDominantMacroIngredients(
+            Map<String, Object> plan,
+            String[] mealKeys,
+            int macroIndex,
+            double targetCarbs,
+            double targetProtein,
+            double targetFat,
+            double targetFillRatio,
+            double maxRatio
+    ) {
+        double[] totals = recalculatePlanAndGetTotals(plan, mealKeys);
+        double[] targets = new double[] {targetCarbs, targetProtein, targetFat};
+        double desiredMacroTotal = targets[macroIndex] * targetFillRatio;
+        double missing = desiredMacroTotal - totals[macroIndex];
+
+        if (missing <= 0) {
+            return false;
+        }
+
+        List<Map<String, Object>> candidates = collectDominantMacroIngredients(plan, mealKeys, macroIndex, true);
+
+        if (candidates.size() == 0) {
+            candidates = collectDominantMacroIngredients(plan, mealKeys, macroIndex, false);
+        }
+
+        if (candidates.size() == 0) {
+            return false;
+        }
+
+        double[] candidateTotals = ingredientListMacroTotals(candidates);
+
+        if (candidateTotals[macroIndex] <= 0) {
+            return false;
+        }
+
+        double desiredFactor = 1.0 + (missing / candidateTotals[macroIndex]);
+        double maxFactor = desiredFactor;
+
+        for (int i = 0; i < 3; i++) {
+            if (candidateTotals[i] <= 0) {
+                continue;
+            }
+
+            double allowedTotal = targets[i] * maxRatio;
+            double availableIncrease = allowedTotal - totals[i];
+
+            if (availableIncrease <= 0) {
+                return false;
+            }
+
+            maxFactor = Math.min(maxFactor, 1.0 + availableIncrease / candidateTotals[i]);
+        }
+
+        double factor = Math.min(desiredFactor, maxFactor);
+
+        // Avoid many tiny adjustments that cause noisy grams.
+        if (factor <= 1.005) {
+            return false;
+        }
+
+        // Do not suddenly double a child portion in one pass. The loop can adjust again.
+        factor = Math.min(factor, 1.35);
+
+        for (Map<String, Object> ingredient : candidates) {
+            scaleIngredientNutrition(ingredient, factor);
+        }
+
+        recalculatePlanAndGetTotals(plan, mealKeys);
+        return true;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> collectDominantMacroIngredients(
+            Map<String, Object> plan,
+            String[] mealKeys,
+            int macroIndex,
+            boolean strict
+    ) {
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
 
         for (String key : mealKeys) {
             Object mealObj = plan.get(key);
@@ -832,27 +1014,82 @@ public class AiMealPlanService {
                 continue;
             }
 
-            Map<String, Object> meal = (Map<String, Object>) mealObj;
-            adjustedCarbs += numberValue(meal.get("totalCarbohydrateG"));
-            adjustedProtein += numberValue(meal.get("totalProteinG"));
-            adjustedFat += numberValue(meal.get("totalFatG"));
+            Object ingredientsObj = ((Map<String, Object>) mealObj).get("ingredients");
+
+            if (!(ingredientsObj instanceof List)) {
+                continue;
+            }
+
+            List<Object> ingredients = (List<Object>) ingredientsObj;
+
+            for (Object ingredientObj : ingredients) {
+                if (!(ingredientObj instanceof Map)) {
+                    continue;
+                }
+
+                Map<String, Object> ingredient = (Map<String, Object>) ingredientObj;
+
+                if (isMacroCandidate(ingredient, macroIndex, strict)) {
+                    result.add(ingredient);
+                }
+            }
         }
 
-        log.info(
-                "AI meal plan macros adjusted by scale {}. Before carbs/protein/fat: {}/{}/{}. Target: {}/{}/{}. After: {}/{}/{}",
-                scale,
-                roundOne(totalCarbs),
-                roundOne(totalProtein),
-                roundOne(totalFat),
-                targetCarbs,
-                targetProtein,
-                targetFat,
-                roundOne(adjustedCarbs),
-                roundOne(adjustedProtein),
-                roundOne(adjustedFat)
-        );
-
         return result;
+    }
+
+    private boolean isMacroCandidate(Map<String, Object> ingredient, int macroIndex, boolean strict) {
+        double carbs = numberValue(ingredient.get("carbohydrateG"));
+        double protein = numberValue(ingredient.get("proteinG"));
+        double fat = numberValue(ingredient.get("fatG"));
+
+        String text = (
+                stringValue(ingredient.get("foodGroup"), "") + " "
+                        + stringValue(ingredient.get("foodNameEn"), "") + " "
+                        + stringValue(ingredient.get("ingredientName"), "")
+        ).toLowerCase();
+
+        if (macroIndex == 0) {
+            if (carbs <= 0) return false;
+
+            if (containsAny(text, "carb", "grain", "rice", "bread", "noodle", "pasta", "oat", "potato", "fruit", "banana", "apple", "flour", "cereal")) {
+                return true;
+            }
+
+            return !strict && carbs >= protein && carbs >= fat;
+        }
+
+        if (macroIndex == 1) {
+            if (protein <= 0) return false;
+
+            if (containsAny(text, "protein", "meat", "chicken", "fish", "egg", "beef", "tofu", "bean", "lentil", "yogurt", "milk", "seafood", "prawn", "shrimp")) {
+                return true;
+            }
+
+            return !strict && protein >= carbs && protein >= fat;
+        }
+
+        if (fat <= 0) return false;
+
+        if (containsAny(text, "fat", "oil", "butter", "avocado", "nut", "peanut", "almond", "cashew", "egg", "milk", "yogurt", "cheese", "salmon", "fish")) {
+            return true;
+        }
+
+        return !strict && fat >= carbs && fat >= protein;
+    }
+
+    private double[] ingredientListMacroTotals(List<Map<String, Object>> ingredients) {
+        double carbs = 0.0;
+        double protein = 0.0;
+        double fat = 0.0;
+
+        for (Map<String, Object> ingredient : ingredients) {
+            carbs += numberValue(ingredient.get("carbohydrateG"));
+            protein += numberValue(ingredient.get("proteinG"));
+            fat += numberValue(ingredient.get("fatG"));
+        }
+
+        return new double[] {carbs, protein, fat};
     }
 
     private double normalizeTarget(Double value, double fallback) {
