@@ -3,6 +3,7 @@ package com.jom.healthy.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jom.healthy.dto.MealPlanGenerateRequest;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -19,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 
 @Service
+@Slf4j
 public class AiMealPlanService {
 
     @Value("${GEMINI_API_KEY:}")
@@ -29,6 +31,7 @@ public class AiMealPlanService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public Map<String, Object> generateMealPlan(MealPlanGenerateRequest request) {
+        log.info("generateMealPlan start=====request:{}", request);
         long startTime = System.currentTimeMillis();
 
         try {
@@ -76,18 +79,21 @@ public class AiMealPlanService {
             );
 
             Map<String, Object> result = parseGeminiResponse(response.getBody());
+            enforceMealPlanTargetLimits(result, request);
 
             long costMs = System.currentTimeMillis() - startTime;
-            System.out.println("Gemini meal plan generation took " + costMs + " ms");
-
+            log.info("generateMealPlan end=====took:{}ms", costMs);
             return result;
         } catch (Exception e) {
             e.printStackTrace();
 
             long costMs = System.currentTimeMillis() - startTime;
             System.out.println("Gemini meal plan generation failed after " + costMs + " ms, fallback returned.");
+            log.error("generateMealPlan error fallback returned",e);
 
-            return fallbackMealPlan(request);
+            Map<String, Object> fallback = fallbackMealPlan(request);
+            enforceMealPlanTargetLimits(fallback, request);
+            return fallback;
         }
     }
 
@@ -153,7 +159,19 @@ public class AiMealPlanService {
         prompt.append("3. Avoid vague names like Healthy Breakfast Bowl unless it is a well-known recipe.\n");
         prompt.append("4. Avoid allergies and dietary restrictions.\n");
         prompt.append("5. Make meals suitable for children.\n");
-        prompt.append("6. The total macros should be reasonably close to the nutrition targets.\n\n");
+        prompt.append("6. The total macros should be reasonably close to the nutrition targets, but must never exceed the hard limits below.\n\n");
+
+        prompt.append("Daily macro hard limit rules:\n");
+        prompt.append("1. targetCarbs = ").append(targetCarbs).append("g, targetProtein = ").append(targetProtein).append("g, targetFat = ").append(targetFat).append("g.\n");
+        prompt.append("2. The sum of totalCarbohydrateG from breakfast + lunch + dinner + snack must be <= targetCarbs.\n");
+        prompt.append("3. The sum of totalProteinG from breakfast + lunch + dinner + snack must be <= targetProtein.\n");
+        prompt.append("4. The sum of totalFatG from breakfast + lunch + dinner + snack must be <= targetFat.\n");
+        prompt.append("5. Do not exceed any target even if the user's meal preference asks for high-carb, high-protein, or high-fat food.\n");
+        prompt.append("6. If the first meal plan exceeds any target, reduce ingredient gramsEstimated and measure portions until all daily totals are within the limits.\n");
+        prompt.append("7. After portion adjustment, update every ingredient's gramsEstimated, measure, energyKcal, proteinG, carbohydrateG, fatG.\n");
+        prompt.append("8. After portion adjustment, update each meal's totalEnergyKcal, totalProteinG, totalCarbohydrateG, totalFatG so they equal the sum of its ingredients.\n");
+        prompt.append("9. Prefer daily totals around 85% to 100% of each target, but staying below the limits is more important than getting close.\n");
+        prompt.append("10. Return realistic child-sized portions. Do not use very large portions like 1000g banana or 500g rice.\n\n");
 
         prompt.append("Multilingual meal field requirements:\n");
         prompt.append("1. Every meal must include English, Simplified Chinese, and Malay versions of the main display fields.\n");
@@ -248,7 +266,11 @@ public class AiMealPlanService {
         prompt.append("13. mealIconEmoji must be a valid emoji string and must not be empty.\n");
         prompt.append("14. mealIconName and mealIconPrompt must not be empty.\n");
         prompt.append("15. All multilingual fields ending with En, Cn, and Ms must be valid strings and must not be empty.\n");
-        prompt.append("16. Use Simplified Chinese for fields ending with Cn and Malay for fields ending with Ms.\n\n");
+        prompt.append("16. Use Simplified Chinese for fields ending with Cn and Malay for fields ending with Ms.\n");
+        prompt.append("17. Daily totalCarbohydrateG must be <= ").append(targetCarbs).append(".\n");
+        prompt.append("18. Daily totalProteinG must be <= ").append(targetProtein).append(".\n");
+        prompt.append("19. Daily totalFatG must be <= ").append(targetFat).append(".\n");
+        prompt.append("20. If daily totals exceed any limit, you must reduce ingredient weights and recalculate the affected meal totals before returning JSON.\n\n");
 
         prompt.append("Return exactly this JSON structure:\n");
         prompt.append("{\n");
@@ -725,6 +747,217 @@ public class AiMealPlanService {
         } catch (Exception e) {
             return "https://www.youtube.com/results?search_query=recipe+tutorial";
         }
+    }
+
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> enforceMealPlanTargetLimits(Map<String, Object> result, MealPlanGenerateRequest request) {
+        if (result == null) {
+            return result;
+        }
+
+        Object planObj = result.get("plan");
+
+        if (!(planObj instanceof Map)) {
+            return result;
+        }
+
+        Map<String, Object> plan = (Map<String, Object>) planObj;
+
+        double targetCarbs = normalizeTarget(request == null ? null : request.getTargetCarbs(), 155.0);
+        double targetProtein = normalizeTarget(request == null ? null : request.getTargetProtein(), 32.0);
+        double targetFat = normalizeTarget(request == null ? null : request.getTargetFat(), 28.0);
+
+        String[] mealKeys = new String[] {"breakfast", "lunch", "dinner", "snack"};
+        double totalCarbs = 0.0;
+        double totalProtein = 0.0;
+        double totalFat = 0.0;
+
+        for (String key : mealKeys) {
+            Object mealObj = plan.get(key);
+
+            if (!(mealObj instanceof Map)) {
+                continue;
+            }
+
+            Map<String, Object> meal = (Map<String, Object>) mealObj;
+            recalculateMealTotalsFromIngredients(meal);
+
+            totalCarbs += numberValue(meal.get("totalCarbohydrateG"));
+            totalProtein += numberValue(meal.get("totalProteinG"));
+            totalFat += numberValue(meal.get("totalFatG"));
+        }
+
+        boolean exceedCarbs = totalCarbs > targetCarbs;
+        boolean exceedProtein = totalProtein > targetProtein;
+        boolean exceedFat = totalFat > targetFat;
+
+        if (!exceedCarbs && !exceedProtein && !exceedFat) {
+            return result;
+        }
+
+        double scale = 1.0;
+
+        if (exceedCarbs && totalCarbs > 0) {
+            scale = Math.min(scale, targetCarbs / totalCarbs);
+        }
+
+        if (exceedProtein && totalProtein > 0) {
+            scale = Math.min(scale, targetProtein / totalProtein);
+        }
+
+        if (exceedFat && totalFat > 0) {
+            scale = Math.min(scale, targetFat / totalFat);
+        }
+
+        // Keep a tiny safety buffer so rounding does not push the day total over the target.
+        scale = Math.max(0.05, Math.min(1.0, scale * 0.995));
+
+        for (String key : mealKeys) {
+            Object mealObj = plan.get(key);
+
+            if (mealObj instanceof Map) {
+                scaleMealNutrition((Map<String, Object>) mealObj, scale);
+            }
+        }
+
+        double adjustedCarbs = 0.0;
+        double adjustedProtein = 0.0;
+        double adjustedFat = 0.0;
+
+        for (String key : mealKeys) {
+            Object mealObj = plan.get(key);
+
+            if (!(mealObj instanceof Map)) {
+                continue;
+            }
+
+            Map<String, Object> meal = (Map<String, Object>) mealObj;
+            adjustedCarbs += numberValue(meal.get("totalCarbohydrateG"));
+            adjustedProtein += numberValue(meal.get("totalProteinG"));
+            adjustedFat += numberValue(meal.get("totalFatG"));
+        }
+
+        log.info(
+                "AI meal plan macros adjusted by scale {}. Before carbs/protein/fat: {}/{}/{}. Target: {}/{}/{}. After: {}/{}/{}",
+                scale,
+                roundOne(totalCarbs),
+                roundOne(totalProtein),
+                roundOne(totalFat),
+                targetCarbs,
+                targetProtein,
+                targetFat,
+                roundOne(adjustedCarbs),
+                roundOne(adjustedProtein),
+                roundOne(adjustedFat)
+        );
+
+        return result;
+    }
+
+    private double normalizeTarget(Double value, double fallback) {
+        if (value == null || value.doubleValue() <= 0 || Double.isNaN(value.doubleValue()) || Double.isInfinite(value.doubleValue())) {
+            return fallback;
+        }
+
+        return value.doubleValue();
+    }
+
+    @SuppressWarnings("unchecked")
+    private void scaleMealNutrition(Map<String, Object> meal, double scale) {
+        Object ingredientsObj = meal.get("ingredients");
+
+        if (ingredientsObj instanceof List) {
+            List<Object> ingredients = (List<Object>) ingredientsObj;
+
+            for (Object ingredientObj : ingredients) {
+                if (ingredientObj instanceof Map) {
+                    scaleIngredientNutrition((Map<String, Object>) ingredientObj, scale);
+                }
+            }
+
+            recalculateMealTotalsFromIngredients(meal);
+            return;
+        }
+
+        meal.put("totalEnergyKcal", roundOne(numberValue(meal.get("totalEnergyKcal")) * scale));
+        meal.put("totalProteinG", roundOne(numberValue(meal.get("totalProteinG")) * scale));
+        meal.put("totalCarbohydrateG", roundOne(numberValue(meal.get("totalCarbohydrateG")) * scale));
+        meal.put("totalFatG", roundOne(numberValue(meal.get("totalFatG")) * scale));
+    }
+
+    private void scaleIngredientNutrition(Map<String, Object> ingredient, double scale) {
+        double originalGrams = numberValue(ingredient.get("gramsEstimated"));
+        int nextGrams = originalGrams > 0 ? Math.max(1, (int) Math.round(originalGrams * scale)) : 0;
+
+        if (nextGrams > 0) {
+            ingredient.put("gramsEstimated", nextGrams);
+            ingredient.put("measure", nextGrams + "g");
+        }
+
+        ingredient.put("energyKcal", roundOne(numberValue(ingredient.get("energyKcal")) * scale));
+        ingredient.put("proteinG", roundOne(numberValue(ingredient.get("proteinG")) * scale));
+        ingredient.put("carbohydrateG", roundOne(numberValue(ingredient.get("carbohydrateG")) * scale));
+        ingredient.put("fatG", roundOne(numberValue(ingredient.get("fatG")) * scale));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void recalculateMealTotalsFromIngredients(Map<String, Object> meal) {
+        Object ingredientsObj = meal.get("ingredients");
+
+        if (!(ingredientsObj instanceof List)) {
+            return;
+        }
+
+        double kcal = 0.0;
+        double protein = 0.0;
+        double carbs = 0.0;
+        double fat = 0.0;
+        boolean hasIngredient = false;
+
+        List<Object> ingredients = (List<Object>) ingredientsObj;
+
+        for (Object ingredientObj : ingredients) {
+            if (!(ingredientObj instanceof Map)) {
+                continue;
+            }
+
+            Map<String, Object> ingredient = (Map<String, Object>) ingredientObj;
+            kcal += numberValue(ingredient.get("energyKcal"));
+            protein += numberValue(ingredient.get("proteinG"));
+            carbs += numberValue(ingredient.get("carbohydrateG"));
+            fat += numberValue(ingredient.get("fatG"));
+            hasIngredient = true;
+        }
+
+        if (!hasIngredient) {
+            return;
+        }
+
+        meal.put("totalEnergyKcal", roundOne(kcal));
+        meal.put("totalProteinG", roundOne(protein));
+        meal.put("totalCarbohydrateG", roundOne(carbs));
+        meal.put("totalFatG", roundOne(fat));
+    }
+
+    private double numberValue(Object value) {
+        if (value == null) {
+            return 0.0;
+        }
+
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+
+        try {
+            return Double.parseDouble(String.valueOf(value).trim());
+        } catch (Exception e) {
+            return 0.0;
+        }
+    }
+
+    private double roundOne(double value) {
+        return Math.round(value * 10.0) / 10.0;
     }
 
     private Map<String, Object> fallbackMealPlan(MealPlanGenerateRequest request) {
