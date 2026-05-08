@@ -108,33 +108,26 @@ public class AiMealPlanService {
         Double targetProtein = request.getTargetProtein() == null ? 32.0 : request.getTargetProtein();
         Double targetFat = request.getTargetFat() == null ? 28.0 : request.getTargetFat();
 
-        String allergies = request.getAllergies() == null
-                ? "[]"
-                : request.getAllergies().toString();
-
-        String restrictions = request.getRestrictions() == null
-                ? "{}"
-                : request.getRestrictions().toString();
-
+        String allergies = request.getAllergies() == null ? "[]" : request.getAllergies().toString();
+        String restrictions = request.getRestrictions() == null ? "{}" : request.getRestrictions().toString();
         String mealPreference = safeString(request.getMealPreference(), "");
 
         String preferenceInstruction;
-
         if (mealPreference.trim().length() > 0) {
-            preferenceInstruction =
-                    "The user wants to eat or include these foods: "
-                            + mealPreference
-                            + ". Try to include them if they are safe and suitable.";
+            preferenceInstruction = "Include the user's requested foods when they are safe and suitable: " + mealPreference + ".";
         } else {
-            preferenceInstruction =
-                    "The user did not enter any food preference. Recommend meals based on the child profile, allergies, restrictions, and nutrition targets.";
+            preferenceInstruction = "No food preference was entered. Choose meals from the child profile, allergies, restrictions, and macro targets.";
         }
 
         StringBuilder prompt = new StringBuilder();
 
-        prompt.append("You are a child nutrition meal planning assistant.\n\n");
+        prompt.append("You are a child nutrition meal planning assistant for the JomHealthy mobile app.\n");
+        prompt.append("Return JSON only. No markdown, no code fence, no comments, no trailing commas.\n\n");
 
-        prompt.append("Generate a 1-day meal plan for a child.\n\n");
+        prompt.append("Task:\n");
+        prompt.append("Generate exactly one full-day child meal plan with four meals: breakfast, lunch, dinner, and snack.\n");
+        prompt.append("Use real, common, child-friendly recipe names. Prefer Malaysian or family-friendly meals. Avoid vague names such as Healthy Breakfast Bowl unless it is a real common recipe.\n");
+        prompt.append("Avoid all allergies and dietary restrictions.\n\n");
 
         prompt.append("Child profile:\n");
         prompt.append("- name: ").append(childName).append("\n");
@@ -143,138 +136,31 @@ public class AiMealPlanService {
         prompt.append("- heightCm: ").append(heightCm).append("\n");
         prompt.append("- weightKg: ").append(weightKg).append("\n");
         prompt.append("- allergies: ").append(allergies).append("\n");
-        prompt.append("- restrictions: ").append(restrictions).append("\n\n");
+        prompt.append("- restrictions: ").append(restrictions).append("\n");
+        prompt.append("- meal preference: ").append(preferenceInstruction).append("\n\n");
 
-        prompt.append("User meal preference:\n");
-        prompt.append(preferenceInstruction).append("\n\n");
+        prompt.append("Macro targets for the whole day:\n");
+        prompt.append("- targetCarbs: ").append(targetCarbs).append("g; acceptable range: ").append(roundOne(targetCarbs * 0.98)).append("g to ").append(targetCarbs).append("g.\n");
+        prompt.append("- targetProtein: ").append(targetProtein).append("g; acceptable range: ").append(roundOne(targetProtein * 0.98)).append("g to ").append(targetProtein).append("g.\n");
+        prompt.append("- targetFat: ").append(targetFat).append("g; acceptable range: ").append(roundOne(targetFat * 0.98)).append("g to ").append(targetFat).append("g.\n");
+        prompt.append("The sum of breakfast + lunch + dinner + snack must be almost equal to these targets, but must never exceed them.\n");
+        prompt.append("If totals are too low, increase suitable ingredient weights; if totals are too high, reduce suitable ingredient weights. Then recalculate ingredient nutrition and meal totals.\n");
+        prompt.append("Use realistic child portions only. Do not use unrealistic portions such as 1000g banana or 500g rice.\n");
+        prompt.append("Prefer adjusting existing ingredients instead of adding unusual ingredients.\n");
+        prompt.append("Macro adjustment hints: carbs = rice/oats/bread/potato/pasta/fruit; protein = chicken/fish/egg/tofu/beef/beans/yogurt; fat = oil/egg yolk/avocado/nuts/milk/yogurt/fish.\n\n");
 
-        prompt.append("Daily nutrition targets:\n");
-        prompt.append("- carbs: ").append(targetCarbs).append("g\n");
-        prompt.append("- protein: ").append(targetProtein).append("g\n");
-        prompt.append("- fat: ").append(targetFat).append("g\n\n");
+        prompt.append("Required meal object fields for every breakfast/lunch/dinner/snack object:\n");
+        prompt.append("idMeal, strMeal, strMealEn, strMealCn, strMealMs, strCategory, strCategoryEn, strCategoryCn, strCategoryMs, strArea, strAreaEn, strAreaCn, strAreaMs, strInstructions, strInstructionsEn, strInstructionsCn, strInstructionsMs, strMealThumb, mealIconEmoji, mealIconName, mealIconPrompt, strYoutube, totalEnergyKcal, totalProteinG, totalCarbohydrateG, totalFatG, ingredients.\n");
+        prompt.append("Language rules: base fields strMeal/strCategory/strArea/strInstructions are English; En fields are English; Cn fields are Simplified Chinese; Ms fields are Malay. No multilingual field may be empty. Keep translated names short and natural for a mobile UI.\n");
+        prompt.append("URL rules: never invent fake URLs, example.com URLs, placeholders, fake TheMealDB images, or fake YouTube IDs. strMealThumb may be empty. strYoutube must not be empty; if no verified direct video URL is known, use https://www.youtube.com/results?search_query=RECIPE_NAME+tutorial using the exact English strMeal with spaces encoded as +.\n");
+        prompt.append("Icon rules: mealIconEmoji must be a matching food emoji and not empty. mealIconName is a short English keyword such as rice, curry, noodle, soup, salad, sandwich, chicken, fish, egg, fruit, porridge, pasta. mealIconPrompt describes a cute flat food icon, app illustration style, white background.\n\n");
 
-        prompt.append("Recipe selection rules:\n");
-        prompt.append("1. Use real, common recipe names.\n");
-        prompt.append("2. Prefer Malaysian or family-friendly meals.\n");
-        prompt.append("3. Avoid vague names like Healthy Breakfast Bowl unless it is a well-known recipe.\n");
-        prompt.append("4. Avoid allergies and dietary restrictions.\n");
-        prompt.append("5. Make meals suitable for children.\n");
-        prompt.append("6. The full-day macro totals should be almost equal to the daily targets after portion adjustment.\n\n");
+        prompt.append("Required ingredient fields for every ingredient:\n");
+        prompt.append("ingredientName, measure, gramsEstimated, foodNameEn, foodNameCn, foodNameMs, foodGroup, energyKcal, proteinG, carbohydrateG, fatG.\n");
+        prompt.append("Ingredient nutrition values are for the actual portion, not per 100g. Each meal total must equal the sum of its ingredients. Do not make all nutrition values zero.\n\n");
 
-        prompt.append("Daily macro target matching rules:\n");
-        prompt.append("1. targetCarbs = ").append(targetCarbs).append("g, targetProtein = ").append(targetProtein).append("g, targetFat = ").append(targetFat).append("g.\n");
-        prompt.append("2. The sum of totalCarbohydrateG from breakfast + lunch + dinner + snack should be between 98% and 100% of targetCarbs, and must never exceed targetCarbs.\n");
-        prompt.append("3. The sum of totalProteinG from breakfast + lunch + dinner + snack should be between 98% and 100% of targetProtein, and must never exceed targetProtein.\n");
-        prompt.append("4. The sum of totalFatG from breakfast + lunch + dinner + snack should be between 98% and 100% of targetFat, and must never exceed targetFat.\n");
-        prompt.append("5. Do not intentionally make the plan too low. A plan that is far below the targets is incorrect.\n");
-        prompt.append("6. If any macro is too low, increase suitable ingredient gramsEstimated and measure portions, then recalculate all ingredient and meal totals.\n");
-        prompt.append("7. If any macro is too high, reduce suitable ingredient gramsEstimated and measure portions, then recalculate all ingredient and meal totals.\n");
-        prompt.append("8. Use carb-rich foods like rice, oats, bread, potato, pasta, fruit to adjust carbs. Use chicken, fish, egg, tofu, beef, beans, yogurt to adjust protein. Use oil, egg yolk, avocado, nuts, milk, yogurt, fish to adjust fat.\n");
-        prompt.append("9. After every portion adjustment, update every ingredient's gramsEstimated, measure, energyKcal, proteinG, carbohydrateG, fatG.\n");
-        prompt.append("10. After every portion adjustment, update each meal's totalEnergyKcal, totalProteinG, totalCarbohydrateG, totalFatG so they equal the sum of its ingredients.\n");
-        prompt.append("11. Return realistic child-sized portions. Do not use very large portions like 1000g banana or 500g rice.\n");
-        prompt.append("12. Prefer changing portion weights of existing ingredients instead of adding unusual ingredients.\n\n");
-
-        prompt.append("Multilingual meal field requirements:\n");
-        prompt.append("1. Every meal must include English, Simplified Chinese, and Malay versions of the main display fields.\n");
-        prompt.append("2. strMeal should be English. strMealEn must equal the English name. strMealCn must be Simplified Chinese. strMealMs must be Malay.\n");
-        prompt.append("3. strCategory should be English. strCategoryEn must equal the English category. strCategoryCn must be Simplified Chinese. strCategoryMs must be Malay.\n");
-        prompt.append("4. strArea should be English. strAreaEn must equal the English area/cuisine. strAreaCn must be Simplified Chinese. strAreaMs must be Malay.\n");
-        prompt.append("5. strInstructions should be English. strInstructionsEn must equal the English cooking instructions. strInstructionsCn must be Simplified Chinese. strInstructionsMs must be Malay.\n");
-        prompt.append("6. Do not leave strMealCn, strMealMs, strCategoryCn, strCategoryMs, strAreaCn, strAreaMs, strInstructionsCn, or strInstructionsMs empty.\n");
-        prompt.append("7. Keep translated names natural and short for app UI display.\n\n");
-
-        prompt.append("URL requirements:\n");
-        prompt.append("1. Do not invent fake URLs.\n");
-        prompt.append("2. Do not use example.com.\n");
-        prompt.append("3. Do not use placeholder URLs.\n");
-        prompt.append("4. Do not create fake themealdb image links.\n");
-        prompt.append("5. Do not create fake YouTube video IDs.\n");
-        prompt.append("6. For strMealThumb, only return a real public HTTPS image URL if you are confident it exists.\n");
-        prompt.append("7. If you are not confident the image URL exists, return an empty string for strMealThumb.\n");
-        prompt.append("8. For strYoutube, do not return a direct YouTube video URL unless you are confident the video exists and matches the recipe.\n");
-        prompt.append("9. If you are not confident about a direct YouTube video URL, return a YouTube search URL instead.\n");
-        prompt.append("10. YouTube search URL format must be:\n");
-        prompt.append("    https://www.youtube.com/results?search_query=RECIPE_NAME+tutorial\n");
-        prompt.append("11. Replace spaces in RECIPE_NAME with +.\n");
-        prompt.append("12. The YouTube search query must use the exact strMeal value plus the word tutorial.\n");
-        prompt.append("13. strYoutube must never be empty.\n");
-        prompt.append("14. If no direct video is known, use the YouTube search URL format.\n");
-        prompt.append("15. strMealThumb can be empty, but strYoutube must be a valid YouTube search URL or a verified direct YouTube video URL.\n\n");
-
-        prompt.append("Meal icon requirements:\n");
-        prompt.append("1. Every meal must include mealIconEmoji, mealIconName, and mealIconPrompt.\n");
-        prompt.append("2. mealIconEmoji must be a food emoji that matches the recipe.\n");
-        prompt.append("3. Use specific emojis when possible, for example: 🍚 rice, 🍛 curry or mixed rice, 🍜 noodles, 🍲 soup, 🥗 salad, 🥪 sandwich or toast, 🍗 chicken, 🐟 fish, 🥚 eggs, 🥣 yogurt/oats/porridge, 🍌 banana, 🍎 fruit, 🥘 stew, 🌮 wrap, 🍝 pasta, 🥞 pancakes.\n");
-        prompt.append("4. mealIconName should be a short English keyword like rice, rice-bowl, curry, noodle, soup, salad, sandwich, chicken, fish, egg, fruit, porridge, pasta.\n");
-        prompt.append("5. mealIconPrompt should describe a cute flat food icon matching the recipe, app illustration style, white background.\n");
-        prompt.append("6. If strMealThumb is empty, mealIconEmoji is required and should not be empty.\n\n");
-
-        prompt.append("Each meal must include:\n");
-        prompt.append("- idMeal\n");
-        prompt.append("- strMeal\n");
-        prompt.append("- strMealEn\n");
-        prompt.append("- strMealCn\n");
-        prompt.append("- strMealMs\n");
-        prompt.append("- strCategory\n");
-        prompt.append("- strCategoryEn\n");
-        prompt.append("- strCategoryCn\n");
-        prompt.append("- strCategoryMs\n");
-        prompt.append("- strArea\n");
-        prompt.append("- strAreaEn\n");
-        prompt.append("- strAreaCn\n");
-        prompt.append("- strAreaMs\n");
-        prompt.append("- strInstructions\n");
-        prompt.append("- strInstructionsEn\n");
-        prompt.append("- strInstructionsCn\n");
-        prompt.append("- strInstructionsMs\n");
-        prompt.append("- strMealThumb\n");
-        prompt.append("- mealIconEmoji\n");
-        prompt.append("- mealIconName\n");
-        prompt.append("- mealIconPrompt\n");
-        prompt.append("- strYoutube\n");
-        prompt.append("- totalEnergyKcal\n");
-        prompt.append("- totalProteinG\n");
-        prompt.append("- totalCarbohydrateG\n");
-        prompt.append("- totalFatG\n");
-        prompt.append("- ingredients\n\n");
-
-        prompt.append("Each ingredient must include:\n");
-        prompt.append("- ingredientName\n");
-        prompt.append("- measure\n");
-        prompt.append("- gramsEstimated\n");
-        prompt.append("- foodNameEn\n");
-        prompt.append("- foodNameCn\n");
-        prompt.append("- foodNameMs\n");
-        prompt.append("- foodGroup\n");
-        prompt.append("- energyKcal\n");
-        prompt.append("- proteinG\n");
-        prompt.append("- carbohydrateG\n");
-        prompt.append("- fatG\n\n");
-
-        prompt.append("Strict JSON rules:\n");
-        prompt.append("1. Return JSON only. Do not return markdown. Do not use ```json.\n");
-        prompt.append("2. The JSON must be strictly valid and parseable by Jackson ObjectMapper.\n");
-        prompt.append("3. Every object key must be wrapped in double quotes.\n");
-        prompt.append("4. Every string value must be wrapped in double quotes.\n");
-        prompt.append("5. Do not add comments.\n");
-        prompt.append("6. Do not add trailing commas.\n");
-        prompt.append("7. Do not return multiple JSON objects.\n");
-        prompt.append("8. Do not add extra text before or after the JSON object.\n");
-        prompt.append("9. Use realistic nutrition estimates. Do not make all values zero.\n");
-        prompt.append("10. For strMealThumb, return empty string if you cannot provide a real working image URL.\n");
-        prompt.append("11. For strYoutube, prefer a valid YouTube search URL using the exact recipe name.\n");
-        prompt.append("12. Example: if strMeal is \"Chicken Rice\", strYoutube should be \"https://www.youtube.com/results?search_query=Chicken+Rice+tutorial\".\n");
-        prompt.append("13. mealIconEmoji must be a valid emoji string and must not be empty.\n");
-        prompt.append("14. mealIconName and mealIconPrompt must not be empty.\n");
-        prompt.append("15. All multilingual fields ending with En, Cn, and Ms must be valid strings and must not be empty.\n");
-        prompt.append("16. Use Simplified Chinese for fields ending with Cn and Malay for fields ending with Ms.\n");
-        prompt.append("17. Daily totalCarbohydrateG should be between ").append(roundOne(targetCarbs * 0.98)).append(" and ").append(targetCarbs).append(".\n");
-        prompt.append("18. Daily totalProteinG should be between ").append(roundOne(targetProtein * 0.98)).append(" and ").append(targetProtein).append(".\n");
-        prompt.append("19. Daily totalFatG should be between ").append(roundOne(targetFat * 0.98)).append(" and ").append(targetFat).append(".\n");
-        prompt.append("20. If daily totals are below or above those ranges, you must adjust ingredient weights and recalculate the affected meal totals before returning JSON.\n\n");
-
-        prompt.append("Return exactly this JSON structure:\n");
+        prompt.append("Output structure:\n");
+        prompt.append("Return one valid JSON object only, shaped exactly like this. Fill all four meal objects completely; do not leave lunch, dinner, or snack empty.\n");
         prompt.append("{\n");
         prompt.append("  \"plan\": {\n");
         prompt.append("    \"breakfast\": {\n");
@@ -287,18 +173,18 @@ public class AiMealPlanService {
         prompt.append("      \"strCategoryEn\": \"Breakfast\",\n");
         prompt.append("      \"strCategoryCn\": \"早餐\",\n");
         prompt.append("      \"strCategoryMs\": \"Sarapan\",\n");
-        prompt.append("      \"strArea\": \"Malaysian or International\",\n");
-        prompt.append("      \"strAreaEn\": \"Malaysian or International\",\n");
-        prompt.append("      \"strAreaCn\": \"马来西亚或国际风味\",\n");
-        prompt.append("      \"strAreaMs\": \"Malaysia atau Antarabangsa\",\n");
+        prompt.append("      \"strArea\": \"Malaysian\",\n");
+        prompt.append("      \"strAreaEn\": \"Malaysian\",\n");
+        prompt.append("      \"strAreaCn\": \"马来西亚风味\",\n");
+        prompt.append("      \"strAreaMs\": \"Malaysia\",\n");
         prompt.append("      \"strInstructions\": \"Cooking instructions\",\n");
         prompt.append("      \"strInstructionsEn\": \"Cooking instructions\",\n");
         prompt.append("      \"strInstructionsCn\": \"烹饪步骤\",\n");
         prompt.append("      \"strInstructionsMs\": \"Arahan memasak\",\n");
-        prompt.append("      \"strMealThumb\": \"real image url or empty string\",\n");
+        prompt.append("      \"strMealThumb\": \"\",\n");
         prompt.append("      \"mealIconEmoji\": \"🍛\",\n");
-        prompt.append("      \"mealIconName\": \"rice-bowl\",\n");
-        prompt.append("      \"mealIconPrompt\": \"A cute flat food icon of this recipe, colorful, minimal, rounded, app illustration style, white background\",\n");
+        prompt.append("      \"mealIconName\": \"rice\",\n");
+        prompt.append("      \"mealIconPrompt\": \"A cute flat food icon of this recipe, app illustration style, white background\",\n");
         prompt.append("      \"strYoutube\": \"https://www.youtube.com/results?search_query=Recipe+name+tutorial\",\n");
         prompt.append("      \"totalEnergyKcal\": 0,\n");
         prompt.append("      \"totalProteinG\": 0,\n");
@@ -307,7 +193,7 @@ public class AiMealPlanService {
         prompt.append("      \"ingredients\": [\n");
         prompt.append("        {\n");
         prompt.append("          \"ingredientName\": \"Egg\",\n");
-        prompt.append("          \"measure\": \"2 large\",\n");
+        prompt.append("          \"measure\": \"100g\",\n");
         prompt.append("          \"gramsEstimated\": 100,\n");
         prompt.append("          \"foodNameEn\": \"Egg\",\n");
         prompt.append("          \"foodNameCn\": \"鸡蛋\",\n");
@@ -320,11 +206,12 @@ public class AiMealPlanService {
         prompt.append("        }\n");
         prompt.append("      ]\n");
         prompt.append("    },\n");
-        prompt.append("    \"lunch\": {},\n");
-        prompt.append("    \"dinner\": {},\n");
-        prompt.append("    \"snack\": {}\n");
+        prompt.append("    \"lunch\": { \"sameSchemaAsBreakfast\": true },\n");
+        prompt.append("    \"dinner\": { \"sameSchemaAsBreakfast\": true },\n");
+        prompt.append("    \"snack\": { \"sameSchemaAsBreakfast\": true }\n");
         prompt.append("  }\n");
         prompt.append("}\n");
+        prompt.append("Do not literally return sameSchemaAsBreakfast. Replace lunch, dinner, and snack with complete meal objects using the exact same fields as breakfast.\n");
 
         return prompt.toString();
     }
