@@ -24,6 +24,7 @@ public interface TheMealDbMealMapper extends BaseMapper<TheMealDbMeal> {
                     "m.str_meal_thumb AS strMealThumb, " +
                     "m.str_tags AS strTags, " +
                     "m.str_youtube AS strYoutube, " +
+                    "m.portion_factor AS portionFactor, " +
 
                     "m.str_ingredient1 AS strIngredient1, " +
                     "m.str_ingredient2 AS strIngredient2, " +

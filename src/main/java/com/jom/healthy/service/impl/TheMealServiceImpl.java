@@ -1,6 +1,5 @@
 package com.jom.healthy.service.impl;
 
-
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -13,7 +12,6 @@ import com.jom.healthy.entity.TheMealDbMealIngredient;
 import com.jom.healthy.mapper.TheMealDbMealIngredientMapper;
 import com.jom.healthy.mapper.TheMealDbMealMapper;
 import com.jom.healthy.service.TheMealService;
-import com.jom.healthy.util.MeasureToGramConverter;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,17 +26,19 @@ import java.math.RoundingMode;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
-public class TheMealServiceImpl extends ServiceImpl<TheMealDbMealMapper, TheMealDbMeal> implements TheMealService {
+public class TheMealServiceImpl extends ServiceImpl<TheMealDbMealMapper, TheMealDbMeal>
+        implements TheMealService {
 
     private static final String API_BASE = "https://www.themealdb.com/api/json/v1/1/search.php?f=";
 
@@ -49,8 +49,6 @@ public class TheMealServiceImpl extends ServiceImpl<TheMealDbMealMapper, TheMeal
     private TheMealDbMealIngredientMapper ingredientMapper;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-
-
 
     @Override
     public List<MealNutritionDto> searchMealsByNamePrefix(String keyword) {
@@ -74,17 +72,31 @@ public class TheMealServiceImpl extends ServiceImpl<TheMealDbMealMapper, TheMeal
 
             if (row.getIngredientId() != null) {
                 MealIngredientNutritionDto ingredientDto = buildIngredientDto(row);
+
+                /*
+                 * gramsEstimated <= 0 的食材：
+                 * 1. 不返回给前端
+                 * 2. 不参与总热量、蛋白质、碳水、脂肪计算
+                 */
+                if (ingredientDto.getGramsEstimated() == null
+                        || ingredientDto.getGramsEstimated().compareTo(BigDecimal.ZERO) <= 0) {
+                    continue;
+                }
+
                 mealDto.getIngredients().add(ingredientDto);
 
                 mealDto.setTotalEnergyKcal(
                         mealDto.getTotalEnergyKcal().add(ingredientDto.getEnergyKcal())
                 );
+
                 mealDto.setTotalProteinG(
                         mealDto.getTotalProteinG().add(ingredientDto.getProteinG())
                 );
+
                 mealDto.setTotalCarbohydrateG(
                         mealDto.getTotalCarbohydrateG().add(ingredientDto.getCarbohydrateG())
                 );
+
                 mealDto.setTotalFatG(
                         mealDto.getTotalFatG().add(ingredientDto.getFatG())
                 );
@@ -166,6 +178,11 @@ public class TheMealServiceImpl extends ServiceImpl<TheMealDbMealMapper, TheMeal
         dto.setCreatedAt(row.getCreatedAt());
         dto.setUpdatedAt(row.getUpdatedAt());
 
+        /*
+         * 返回当前食谱的份量缩放系数给前端
+         */
+        dto.setPortionFactor(getValidPortionFactor(row.getPortionFactor()));
+
         dto.setTotalEnergyKcal(BigDecimal.ZERO);
         dto.setTotalProteinG(BigDecimal.ZERO);
         dto.setTotalCarbohydrateG(BigDecimal.ZERO);
@@ -183,11 +200,9 @@ public class TheMealServiceImpl extends ServiceImpl<TheMealDbMealMapper, TheMeal
         dto.setMealId(row.getMealId());
         dto.setIngredientOrder(row.getIngredientOrder());
         dto.setIngredientName(row.getIngredientName());
-        dto.setMeasure(row.getMeasure());
         dto.setNormalizedName(row.getNormalizedName());
         dto.setMyfcdFoodId(row.getMyfcdFoodId());
         dto.setMyfcdFoodName(row.getMyfcdFoodName());
-        dto.setGramsEstimated(row.getGramsEstimated());
         dto.setMappingConfidence(row.getMappingConfidence());
 
         dto.setFoodId(row.getFoodId());
@@ -202,28 +217,60 @@ public class TheMealServiceImpl extends ServiceImpl<TheMealDbMealMapper, TheMeal
         dto.setCarbohydrateGPer100g(row.getCarbohydrateGPer100g());
         dto.setFatGPer100g(row.getFatGPer100g());
 
-        BigDecimal grams = row.getGramsEstimated();
+        /*
+         * 获取食谱份量缩放系数
+         * 例如：
+         * 1.00 = 原始份量
+         * 0.50 = 返回一半份量
+         */
+        BigDecimal portionFactor = getValidPortionFactor(row.getPortionFactor());
 
-        if (grams == null || grams.compareTo(BigDecimal.ZERO) <= 0) {
-            grams = MeasureToGramConverter.convertToGram(
-                    row.getMeasure(),
-                    row.getIngredientName(),
-                    row.getNormalizedName()
-            );
+        /*
+         * 直接读取数据库中已经回填好的 grams_estimated
+         */
+        BigDecimal originalGrams = row.getGramsEstimated();
+
+        if (originalGrams == null || originalGrams.compareTo(BigDecimal.ZERO) <= 0) {
+            originalGrams = BigDecimal.ZERO;
         }
 
-        dto.setGramsEstimated(grams);
+        /*
+         * 根据 portionFactor 缩放实际食材重量
+         */
+        BigDecimal scaledGrams = originalGrams
+                .multiply(portionFactor)
+                .setScale(2, RoundingMode.HALF_UP);
 
-        dto.setEnergyKcal(calculateByGram(row.getEnergyKcalPer100g(), grams));
-        dto.setProteinG(calculateByGram(row.getProteinGPer100g(), grams));
-        dto.setCarbohydrateG(calculateByGram(row.getCarbohydrateGPer100g(), grams));
-        dto.setFatG(calculateByGram(row.getFatGPer100g(), grams));
+        dto.setGramsEstimated(scaledGrams);
+
+        /*
+         * measure 中如果是明确的重量单位：
+         * 800g -> portionFactor = 0.5 后返回 400g
+         * 1kg -> portionFactor = 0.5 后返回 0.5kg
+         */
+        dto.setMeasure(scaleWeightMeasure(row.getMeasure(), portionFactor));
+
+        /*
+         * 根据缩放后的 gramsEstimated 计算实际营养值
+         */
+        dto.setEnergyKcal(calculateByGram(row.getEnergyKcalPer100g(), scaledGrams));
+        dto.setProteinG(calculateByGram(row.getProteinGPer100g(), scaledGrams));
+        dto.setCarbohydrateG(calculateByGram(row.getCarbohydrateGPer100g(), scaledGrams));
+        dto.setFatG(calculateByGram(row.getFatGPer100g(), scaledGrams));
 
         return dto;
     }
 
+    /**
+     * 根据实际重量计算营养值：
+     * 每100g营养值 × 实际重量 / 100
+     */
     private BigDecimal calculateByGram(Number valuePer100g, BigDecimal grams) {
         if (valuePer100g == null || grams == null) {
+            return BigDecimal.ZERO;
+        }
+
+        if (grams.compareTo(BigDecimal.ZERO) <= 0) {
             return BigDecimal.ZERO;
         }
 
@@ -233,7 +280,59 @@ public class TheMealServiceImpl extends ServiceImpl<TheMealDbMealMapper, TheMeal
                 .setScale(2, RoundingMode.HALF_UP);
     }
 
+    /**
+     * 保证 portionFactor 有效：
+     * null / <= 0 都按 1.00 处理
+     */
+    private BigDecimal getValidPortionFactor(BigDecimal portionFactor) {
+        if (portionFactor == null || portionFactor.compareTo(BigDecimal.ZERO) <= 0) {
+            return BigDecimal.ONE;
+        }
 
+        return portionFactor;
+    }
+
+    /**
+     * 只缩放 measure 中明确写出的重量单位：
+     * 800g -> 400g
+     * 200 g -> 100 g
+     * 1kg -> 0.5kg
+     * 2 x 400g -> 2 x 200g
+     */
+    private String scaleWeightMeasure(String measure, BigDecimal portionFactor) {
+        if (measure == null || measure.trim().isEmpty()) {
+            return measure;
+        }
+
+        if (portionFactor == null || portionFactor.compareTo(BigDecimal.ONE) == 0) {
+            return measure;
+        }
+
+        Pattern pattern = Pattern.compile(
+                "(\\d+(?:\\.\\d+)?)\\s*(kg|g|gram|grams)\\b",
+                Pattern.CASE_INSENSITIVE
+        );
+
+        Matcher matcher = pattern.matcher(measure);
+        StringBuffer result = new StringBuffer();
+
+        while (matcher.find()) {
+            BigDecimal originalValue = new BigDecimal(matcher.group(1));
+            String unit = matcher.group(2);
+
+            BigDecimal scaledValue = originalValue
+                    .multiply(portionFactor)
+                    .stripTrailingZeros();
+
+            String replacement = scaledValue.toPlainString() + unit;
+
+            matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
+        }
+
+        matcher.appendTail(result);
+
+        return result.toString();
+    }
 
     public void importAllMeals() throws Exception {
         for (char c = 'a'; c <= 'z'; c++) {
@@ -274,9 +373,26 @@ public class TheMealServiceImpl extends ServiceImpl<TheMealDbMealMapper, TheMeal
         );
 
         if (existing == null) {
+            /*
+             * 新食谱默认使用完整原始份量
+             */
+            meal.setPortionFactor(BigDecimal.ONE);
             mealMapper.insert(meal);
         } else {
             meal.setId(existing.getId());
+
+            /*
+             * 已有食谱重新导入时，保留原本设置好的 portionFactor
+             */
+            BigDecimal existingPortionFactor = existing.getPortionFactor();
+
+            if (existingPortionFactor == null
+                    || existingPortionFactor.compareTo(BigDecimal.ZERO) <= 0) {
+                meal.setPortionFactor(BigDecimal.ONE);
+            } else {
+                meal.setPortionFactor(existingPortionFactor);
+            }
+
             mealMapper.updateById(meal);
         }
 
@@ -359,7 +475,6 @@ public class TheMealServiceImpl extends ServiceImpl<TheMealDbMealMapper, TheMeal
 
         return result.toString();
     }
-
 
     private TheMealDbMeal convertToMealEntity(JsonNode node) throws Exception {
         TheMealDbMeal meal = new TheMealDbMeal();

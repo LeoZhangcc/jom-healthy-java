@@ -93,4 +93,5 @@ public class MealNutritionRowDto {
     private Double proteinGPer100g;
     private Double carbohydrateGPer100g;
     private Double fatGPer100g;
+    private BigDecimal portionFactor;
 }

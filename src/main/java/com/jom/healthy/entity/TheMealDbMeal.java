@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
@@ -78,4 +79,5 @@ public class TheMealDbMeal {
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private BigDecimal portionFactor;
 }

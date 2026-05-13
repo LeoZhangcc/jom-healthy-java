@@ -76,6 +76,7 @@ public class MealNutritionDto {
     private BigDecimal totalProteinG;
     private BigDecimal totalCarbohydrateG;
     private BigDecimal totalFatG;
+    private BigDecimal portionFactor;
 
     private List<MealIngredientNutritionDto> ingredients;
 }
