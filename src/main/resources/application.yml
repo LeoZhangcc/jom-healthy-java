@@ -7,9 +7,11 @@ spring:
     allow-bean-definition-overriding: true
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://mysql-jomhealthy-jomhealthy.b.aivencloud.com:12100/jomhealthy?useSSL=true&verifyServerCertificate=false&serverTimezone=Asia/Kuala_Lumpur&allowPublicKeyRetrieval=true
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
+    # 💡 注意这里改成了 localhost 和 3306 端口，关闭了 SSL
+    url: jdbc:mysql://localhost:3306/jomhealthy_db?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Kuala_Lumpur&useSSL=false
+    # 💡 纯文本，不要加 ${}
+    username: root
+    password: 196921
   thymeleaf:
     cache: false
   profiles:
