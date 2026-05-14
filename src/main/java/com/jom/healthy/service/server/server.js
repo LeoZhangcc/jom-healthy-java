@@ -6,6 +6,10 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 
+app.get('/', (req, res) => {
+  res.send('JomHealthy API is live and running!');
+});
+
 // Connect to your live Aiven database using the secure URL
 const pool = mysql.createPool(process.env.DATABASE_URL);
 
