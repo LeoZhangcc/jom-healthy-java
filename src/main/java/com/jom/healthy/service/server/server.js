@@ -24,7 +24,7 @@ app.get('/api/drinks/search', async (req, res) => {
   try {
     // Search the original English description column
     const [rows] = await pool.query(
-      `SELECT fdc_id, description, sugar_g_per_100g 
+      `SELECT fdc_id, description, sugar_g_per_100g, calories_kcal_per_100g, carbohydrate_g_per_100g, protein_g_per_100g 
        FROM beverages_nutrition 
        WHERE description LIKE ? 
        LIMIT 10`, 
@@ -47,8 +47,12 @@ app.get('/api/drinks/search', async (req, res) => {
         emoji: emoji,
         amountValue: 250, 
         type: isUnhealthy ? 'unhealthy' : 'healthy',
-        title: drink.description.replace('Beverages, ', '').split(',')[0], 
-        sugar: drink.sugar_g_per_100g
+        title: drink.description, 
+        sugar: drink.sugar_g_per_100g,
+        // 2. Add the new data to the final JSON response:
+        energy: drink.calories_kcal_per_100g,
+        carbs: drink.carbohydrate_g_per_100g,
+        protein: drink.protein_g_per_100g
       };
     });
 
