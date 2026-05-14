@@ -1,7 +1,7 @@
 package com.jom.healthy.dto;
 
-
 import lombok.Data;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
@@ -13,9 +13,19 @@ public class MealNutritionRowDto {
 
     private String strMeal;
     private String strMealAlternate;
+
     private String strCategory;
+    private String strCategoryCn;
+    private String strCategoryMs;
+
     private String strArea;
+    private String strAreaCn;
+    private String strAreaMs;
+
     private String strInstructions;
+    private String strInstructionsCn;
+    private String strInstructionsMs;
+
     private String strMealThumb;
     private String strTags;
     private String strYoutube;
@@ -93,5 +103,6 @@ public class MealNutritionRowDto {
     private Double proteinGPer100g;
     private Double carbohydrateGPer100g;
     private Double fatGPer100g;
+
     private BigDecimal portionFactor;
 }
