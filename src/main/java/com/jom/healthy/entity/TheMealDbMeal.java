@@ -19,10 +19,19 @@ public class TheMealDbMeal {
 
     private String strMeal;
     private String strMealAlternate;
+
     private String strCategory;
+    private String strCategoryCn;
+    private String strCategoryMs;
+
     private String strArea;
+    private String strAreaCn;
+    private String strAreaMs;
 
     private String strInstructions;
+    private String strInstructionsCn;
+    private String strInstructionsMs;
+
     private String strMealThumb;
     private String strTags;
     private String strYoutube;
@@ -79,5 +88,6 @@ public class TheMealDbMeal {
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+
     private BigDecimal portionFactor;
 }

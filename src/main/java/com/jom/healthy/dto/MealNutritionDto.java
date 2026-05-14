@@ -1,6 +1,5 @@
 package com.jom.healthy.dto;
 
-
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -15,9 +14,19 @@ public class MealNutritionDto {
 
     private String strMeal;
     private String strMealAlternate;
+
     private String strCategory;
+    private String strCategoryCn;
+    private String strCategoryMs;
+
     private String strArea;
+    private String strAreaCn;
+    private String strAreaMs;
+
     private String strInstructions;
+    private String strInstructionsCn;
+    private String strInstructionsMs;
+
     private String strMealThumb;
     private String strTags;
     private String strYoutube;

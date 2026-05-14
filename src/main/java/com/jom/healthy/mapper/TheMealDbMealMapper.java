@@ -6,6 +6,7 @@ import com.jom.healthy.entity.TheMealDbMeal;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
 
@@ -18,9 +19,19 @@ public interface TheMealDbMealMapper extends BaseMapper<TheMealDbMeal> {
                     "m.id_meal AS idMeal, " +
                     "m.str_meal AS strMeal, " +
                     "m.str_meal_alternate AS strMealAlternate, " +
+
                     "m.str_category AS strCategory, " +
+                    "m.str_category_cn AS strCategoryCn, " +
+                    "m.str_category_ms AS strCategoryMs, " +
+
                     "m.str_area AS strArea, " +
+                    "m.str_area_cn AS strAreaCn, " +
+                    "m.str_area_ms AS strAreaMs, " +
+
                     "m.str_instructions AS strInstructions, " +
+                    "m.str_instructions_cn AS strInstructionsCn, " +
+                    "m.str_instructions_ms AS strInstructionsMs, " +
+
                     "m.str_meal_thumb AS strMealThumb, " +
                     "m.str_tags AS strTags, " +
                     "m.str_youtube AS strYoutube, " +
@@ -109,4 +120,174 @@ public interface TheMealDbMealMapper extends BaseMapper<TheMealDbMeal> {
                     "ORDER BY m.str_meal ASC, i.ingredient_order ASC"
     )
     List<MealNutritionRowDto> searchMealNutritionByPrefix(@Param("keyword") String keyword);
+
+
+    /**
+     * 查询需要翻译的 meal，每次最多 size 条
+     */
+    @Select(
+            "SELECT " +
+                    "id, " +
+                    "str_category AS strCategory, " +
+                    "str_area AS strArea, " +
+                    "str_instructions AS strInstructions " +
+                    "FROM themealdb_meals " +
+                    "WHERE id >= #{id} " +
+                    "AND ( " +
+                    "   (str_category IS NOT NULL AND str_category <> '' AND " +
+                    "       (str_category_cn IS NULL OR str_category_cn = '' " +
+                    "        OR str_category_ms IS NULL OR str_category_ms = '')) " +
+                    "   OR " +
+                    "   (str_area IS NOT NULL AND str_area <> '' AND " +
+                    "       (str_area_cn IS NULL OR str_area_cn = '' " +
+                    "        OR str_area_ms IS NULL OR str_area_ms = '')) " +
+                    "   OR " +
+                    "   (str_instructions IS NOT NULL AND str_instructions <> '' AND " +
+                    "       (str_instructions_cn IS NULL OR str_instructions_cn = '' " +
+                    "        OR str_instructions_ms IS NULL OR str_instructions_ms = '')) " +
+                    ") " +
+                    "ORDER BY id ASC " +
+                    "LIMIT #{size}"
+    )
+    List<TheMealDbMeal> selectMealsNeedTranslation(@Param("id") Long id,
+                                                   @Param("size") Integer size);
+
+
+    /**
+     * 更新翻译字段：
+     * 只填充原本为空的字段，不覆盖已有翻译
+     */
+    @Update(
+            "UPDATE themealdb_meals SET " +
+
+                    "str_category_cn = CASE " +
+                    "   WHEN str_category_cn IS NULL OR str_category_cn = '' " +
+                    "   THEN #{strCategoryCn} ELSE str_category_cn END, " +
+
+                    "str_category_ms = CASE " +
+                    "   WHEN str_category_ms IS NULL OR str_category_ms = '' " +
+                    "   THEN #{strCategoryMs} ELSE str_category_ms END, " +
+
+                    "str_area_cn = CASE " +
+                    "   WHEN str_area_cn IS NULL OR str_area_cn = '' " +
+                    "   THEN #{strAreaCn} ELSE str_area_cn END, " +
+
+                    "str_area_ms = CASE " +
+                    "   WHEN str_area_ms IS NULL OR str_area_ms = '' " +
+                    "   THEN #{strAreaMs} ELSE str_area_ms END, " +
+
+                    "str_instructions_cn = CASE " +
+                    "   WHEN str_instructions_cn IS NULL OR str_instructions_cn = '' " +
+                    "   THEN #{strInstructionsCn} ELSE str_instructions_cn END, " +
+
+                    "str_instructions_ms = CASE " +
+                    "   WHEN str_instructions_ms IS NULL OR str_instructions_ms = '' " +
+                    "   THEN #{strInstructionsMs} ELSE str_instructions_ms END, " +
+
+                    "updated_at = NOW() " +
+                    "WHERE id = #{id}"
+    )
+    int updateMealTranslationFields(TheMealDbMeal meal);
+
+    /**
+     * 查询需要翻译分类或地区的 meal
+     * 一次最多 200 条
+     */
+    @Select(
+            "SELECT " +
+                    "id, " +
+                    "str_category AS strCategory, " +
+                    "str_area AS strArea " +
+                    "FROM themealdb_meals " +
+                    "WHERE id >= #{id} " +
+                    "AND ( " +
+                    "   (str_category IS NOT NULL AND str_category <> '' AND " +
+                    "       (str_category_cn IS NULL OR str_category_cn = '' " +
+                    "        OR str_category_ms IS NULL OR str_category_ms = '')) " +
+                    "   OR " +
+                    "   (str_area IS NOT NULL AND str_area <> '' AND " +
+                    "       (str_area_cn IS NULL OR str_area_cn = '' " +
+                    "        OR str_area_ms IS NULL OR str_area_ms = '')) " +
+                    ") " +
+                    "ORDER BY id ASC " +
+                    "LIMIT #{size}"
+    )
+    List<TheMealDbMeal> selectMealsNeedCategoryAreaTranslation(
+            @Param("id") Long id,
+            @Param("size") Integer size
+    );
+
+
+    /**
+     * 查询需要翻译做法步骤的 meal
+     * 一次最多 5 条
+     */
+    @Select(
+            "SELECT " +
+                    "id, " +
+                    "str_instructions AS strInstructions " +
+                    "FROM themealdb_meals " +
+                    "WHERE str_instructions IS NOT NULL " +
+                    "AND str_instructions_cn IS NULL " +
+                    "AND str_instructions <> '' " +
+                    "AND ( " +
+                    "   str_instructions_cn IS NULL OR str_instructions_cn = '' " +
+                    "   OR str_instructions_ms IS NULL OR str_instructions_ms = '' " +
+                    ") " +
+                    "ORDER BY id ASC " +
+                    "LIMIT #{size}"
+    )
+    List<TheMealDbMeal> selectMealsNeedInstructionsTranslation(
+            @Param("size") Integer size
+    );
+
+
+    /**
+     * 更新分类和地区翻译
+     * 只填空，不覆盖已有值
+     */
+    @Update(
+            "UPDATE themealdb_meals SET " +
+
+                    "str_category_cn = CASE " +
+                    "   WHEN str_category_cn IS NULL OR str_category_cn = '' " +
+                    "   THEN #{strCategoryCn} ELSE str_category_cn END, " +
+
+                    "str_category_ms = CASE " +
+                    "   WHEN str_category_ms IS NULL OR str_category_ms = '' " +
+                    "   THEN #{strCategoryMs} ELSE str_category_ms END, " +
+
+                    "str_area_cn = CASE " +
+                    "   WHEN str_area_cn IS NULL OR str_area_cn = '' " +
+                    "   THEN #{strAreaCn} ELSE str_area_cn END, " +
+
+                    "str_area_ms = CASE " +
+                    "   WHEN str_area_ms IS NULL OR str_area_ms = '' " +
+                    "   THEN #{strAreaMs} ELSE str_area_ms END, " +
+
+                    "updated_at = NOW() " +
+                    "WHERE id = #{id}"
+    )
+    int updateMealCategoryAreaTranslationFields(TheMealDbMeal meal);
+
+
+    /**
+     * 更新做法步骤翻译
+     * 只填空，不覆盖已有值
+     */
+    @Update(
+            "UPDATE themealdb_meals SET " +
+
+                    "str_instructions_cn = CASE " +
+                    "   WHEN str_instructions_cn IS NULL OR str_instructions_cn = '' " +
+                    "   THEN #{strInstructionsCn} ELSE str_instructions_cn END, " +
+
+                    "str_instructions_ms = CASE " +
+                    "   WHEN str_instructions_ms IS NULL OR str_instructions_ms = '' " +
+                    "   THEN #{strInstructionsMs} ELSE str_instructions_ms END, " +
+
+                    "updated_at = NOW() " +
+                    "WHERE id = #{id}"
+    )
+    int updateMealInstructionsTranslationFields(TheMealDbMeal meal);
 }
