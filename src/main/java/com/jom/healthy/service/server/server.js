@@ -6,8 +6,13 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 
-app.get('/', (req, res) => {
-  res.send('JomHealthy API is live and running!');
+app.all('/', (req, res) => {
+  // If it's a HEAD request, we just send the status and no body
+  if (req.method === 'HEAD') {
+    return res.status(200).end();
+  }
+  // If it's a normal browser visit (GET)
+  res.status(200).send('JomHealthy API is live and running!');
 });
 
 // Connect to your live Aiven database using the secure URL
