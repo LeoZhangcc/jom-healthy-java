@@ -62,8 +62,11 @@ public class AiMealPlanService {
             contents.add(content);
 
             Map<String, Object> generationConfig = new HashMap<String, Object>();
-            generationConfig.put("temperature", 0.5);
+            generationConfig.put("temperature", 0.35);
             generationConfig.put("responseMimeType", "application/json");
+            // Multi-day plans are large JSON payloads. Without an explicit high output cap,
+            // Gemini may stop mid-object and return incomplete JSON.
+            generationConfig.put("maxOutputTokens", 65535);
 
             Map<String, Object> body = new HashMap<String, Object>();
             body.put("contents", contents);
@@ -175,6 +178,25 @@ public class AiMealPlanService {
         log.info("generateMealPlanByGroq start=====request:{}", request);
         long startTime = System.currentTimeMillis();
 
+        /*
+         * Your current Groq on_demand quota is 8000 TPM.
+         * A multi-day full JSON plan reserves too many tokens in one request,
+         * especially when max_completion_tokens is large.
+         *
+         * So:
+         * - 1 day: Groq can still be used.
+         * - 2+ days: delegate to Gemini's generateMealPlan(...) once,
+         *   which already supports multi-day single-request output.
+         */
+        int requestedDays = normalizeRequestedDays(request);
+        if (requestedDays > 1) {
+            log.info(
+                    "generateMealPlanByGroq rerouted to Gemini for multi-day request=====days:{}",
+                    requestedDays
+            );
+            return generateMealPlan(request);
+        }
+
         try {
             if (groqApiKey == null || groqApiKey.trim().length() == 0) {
                 throw new RuntimeException("GROQ_API_KEY is empty");
@@ -227,7 +249,7 @@ public class AiMealPlanService {
             log.info(
                     "generateMealPlanByGroq request ready=====promptLength:{}, maxCompletionTokens:{}",
                     prompt == null ? 0 : prompt.length(),
-                    8192
+                    6000
             );
 
             String url = "https://api.groq.com/openai/v1/chat/completions";
@@ -300,7 +322,6 @@ public class AiMealPlanService {
             return fallback;
         }
     }
-
     private String buildPrompt(MealPlanGenerateRequest request) {
         String childName = safeString(request.getChildName(), "Guest");
         Integer age = request.getAge() == null ? 7 : request.getAge();
@@ -311,6 +332,8 @@ public class AiMealPlanService {
         Double targetCarbs = request.getTargetCarbs() == null ? 155.0 : request.getTargetCarbs();
         Double targetProtein = request.getTargetProtein() == null ? 32.0 : request.getTargetProtein();
         Double targetFat = request.getTargetFat() == null ? 28.0 : request.getTargetFat();
+
+        int requestedDays = getRequestedDays(request);
 
         String allergies = request.getAllergies() == null
                 ? "[]"
@@ -337,9 +360,11 @@ public class AiMealPlanService {
         prompt.append("Return one strictly valid JSON object only. No markdown, no comments, no extra text.\n\n");
 
         prompt.append("Task:\n");
-        prompt.append("Generate a 1-day meal plan with exactly four meals: breakfast, lunch, dinner, and snack.\n");
+        prompt.append("Generate a ").append(requestedDays).append("-day meal plan in ONE JSON response.\n");
+        prompt.append("Each day must contain exactly four meals: breakfast, lunch, dinner, and snack.\n");
         prompt.append("Use real, common, child-friendly recipes. Prefer Malaysian or family-friendly meals.\n");
-        prompt.append("Avoid allergies and dietary restrictions. Use realistic child-sized portions.\n\n");
+        prompt.append("Avoid allergies and dietary restrictions. Use realistic child-sized portions.\n");
+        prompt.append("Across different days, make the meals meaningfully varied instead of repeating the same whole-day plan.\n\n");
 
         prompt.append("Child profile:\n");
         prompt.append("- name: ").append(childName).append("\n");
@@ -351,55 +376,73 @@ public class AiMealPlanService {
         prompt.append("- restrictions: ").append(restrictions).append("\n");
         prompt.append("- mealPreference: ").append(preferenceInstruction).append("\n\n");
 
-        prompt.append("Daily macro targets:\n");
+        prompt.append("Daily macro targets, applied independently to EACH day:\n");
         prompt.append("- carbohydrates: ").append(targetCarbs).append("g\n");
         prompt.append("- protein: ").append(targetProtein).append("g\n");
         prompt.append("- fat: ").append(targetFat).append("g\n\n");
 
-        prompt.append("Macro balancing rules:\n");
-        prompt.append("- Total carbohydrates across all four meals must be between ")
+        prompt.append("Macro balancing rules for EACH day:\n");
+        prompt.append("- For every day, total carbohydrates across its four meals must be between ")
                 .append(roundOne(targetCarbs * 0.98))
                 .append("g and ")
                 .append(targetCarbs)
                 .append("g, and never exceed the target.\n");
-        prompt.append("- Total protein across all four meals must be between ")
+        prompt.append("- For every day, total protein across its four meals must be between ")
                 .append(roundOne(targetProtein * 0.98))
                 .append("g and ")
                 .append(targetProtein)
                 .append("g, and never exceed the target.\n");
-        prompt.append("- Total fat across all four meals must be between ")
+        prompt.append("- For every day, total fat across its four meals must be between ")
                 .append(roundOne(targetFat * 0.98))
                 .append("g and ")
                 .append(targetFat)
                 .append("g, and never exceed the target.\n");
-        prompt.append("- Adjust ingredient gramsEstimated and measure to meet the targets.\n");
+        prompt.append("- Adjust ingredient gramsEstimated and measure to meet the targets for each day.\n");
         prompt.append("- After adjustment, recalculate ingredient energyKcal, proteinG, carbohydrateG, fatG.\n");
         prompt.append("- Each meal totalEnergyKcal, totalProteinG, totalCarbohydrateG, totalFatG must equal the sum of its ingredients.\n");
-        prompt.append("- Do not return unrealistic portions or all-zero nutrition values.\n\n");
+        prompt.append("- Do not return unrealistic portions or all-zero nutrition values.\n");
+        prompt.append("- Keep the JSON compact. Avoid unnecessarily long prose, long marketing wording, or repeated explanations.\n\n");
 
         prompt.append("Multilingual rules:\n");
         prompt.append("- Each meal must include English, Simplified Chinese, and Malay display fields.\n");
         prompt.append("- strMeal and strMealEn are English; strMealCn is Simplified Chinese; strMealMs is Malay.\n");
         prompt.append("- Apply the same pattern to strCategory, strArea, and strInstructions.\n");
-        prompt.append("- All En, Cn, and Ms fields must be non-empty natural strings suitable for app UI display.\n\n");
+        prompt.append("- Keep strInstructionsEn, strInstructionsCn, and strInstructionsMs concise: at most 3 short sentences each.\n");
+        prompt.append("- All En, Cn, and Ms display fields must be natural strings suitable for app UI display.\n\n");
 
         prompt.append("Media and icon rules:\n");
         prompt.append("- strMealThumb: return a real public HTTPS image URL only if confident it exists; otherwise return an empty string.\n");
-        prompt.append("- strYoutube must never be empty. Use a verified direct YouTube URL, or use this fallback search URL format:\n");
-        prompt.append("  https://www.youtube.com/results?search_query=RECIPE_NAME+tutorial\n");
-        prompt.append("- In the fallback search URL, RECIPE_NAME must use the exact strMeal value with spaces replaced by +.\n");
+        prompt.append("- strYoutube may be an empty string if you are not confident. The server will fill a fallback search URL later.\n");
         prompt.append("- Each meal must include mealIconEmoji, mealIconName, and mealIconPrompt.\n");
-        prompt.append("- mealIconEmoji must match the recipe; mealIconName should be a short English food keyword; mealIconPrompt should describe a cute flat app-style food icon on a white background.\n\n");
+        prompt.append("- mealIconEmoji should match the recipe. mealIconName and mealIconPrompt may be empty strings when unsure; the server will fill them later.\n\n");
 
         prompt.append("Required JSON structure:\n");
-        prompt.append("{\n");
-        prompt.append("  \"plan\": {\n");
-        prompt.append("    \"breakfast\": { ...mealObject },\n");
-        prompt.append("    \"lunch\": { ...mealObject },\n");
-        prompt.append("    \"dinner\": { ...mealObject },\n");
-        prompt.append("    \"snack\": { ...mealObject }\n");
-        prompt.append("  }\n");
-        prompt.append("}\n\n");
+        if (requestedDays <= 1) {
+            prompt.append("{\n");
+            prompt.append("  \"plan\": {\n");
+            prompt.append("    \"breakfast\": { ...mealObject },\n");
+            prompt.append("    \"lunch\": { ...mealObject },\n");
+            prompt.append("    \"dinner\": { ...mealObject },\n");
+            prompt.append("    \"snack\": { ...mealObject }\n");
+            prompt.append("  }\n");
+            prompt.append("}\n\n");
+        } else {
+            prompt.append("{\n");
+            prompt.append("  \"plans\": [\n");
+            prompt.append("    {\n");
+            prompt.append("      \"day\": 1,\n");
+            prompt.append("      \"plan\": {\n");
+            prompt.append("        \"breakfast\": { ...mealObject },\n");
+            prompt.append("        \"lunch\": { ...mealObject },\n");
+            prompt.append("        \"dinner\": { ...mealObject },\n");
+            prompt.append("        \"snack\": { ...mealObject }\n");
+            prompt.append("      }\n");
+            prompt.append("    }\n");
+            prompt.append("  ]\n");
+            prompt.append("}\n\n");
+            prompt.append("The plans array must contain exactly ").append(requestedDays).append(" day objects, in ascending day order from 1 to ").append(requestedDays).append(".\n");
+            prompt.append("Each day object must contain day and plan. The day value must be an integer.\n\n");
+        }
 
         prompt.append("Each mealObject must contain exactly these fields:\n");
         prompt.append("idMeal, strMeal, strMealEn, strMealCn, strMealMs, ");
@@ -424,10 +467,18 @@ public class AiMealPlanService {
 
     private Map<String, Object> parseGeminiResponse(String responseBody) throws Exception {
         JsonNode root = objectMapper.readTree(responseBody);
+        JsonNode candidate = root.path("candidates").path(0);
 
-        String text = root
-                .path("candidates")
-                .path(0)
+        String finishReason = candidate.path("finishReason").asText("");
+        if ("MAX_TOKENS".equalsIgnoreCase(finishReason)) {
+            throw new RuntimeException(
+                    "Gemini stopped because MAX_TOKENS was reached. The multi-day JSON was incomplete. " +
+                            "The service now requests maxOutputTokens=65535, but the generated plan may still be too large. " +
+                            "Reduce requested days or keep recipe instructions shorter."
+            );
+        }
+
+        String text = candidate
                 .path("content")
                 .path("parts")
                 .path(0)
@@ -435,10 +486,17 @@ public class AiMealPlanService {
                 .asText();
 
         if (text == null || text.trim().length() == 0) {
-            throw new RuntimeException("Gemini returned empty text");
+            throw new RuntimeException("Gemini returned empty text, finishReason=" + finishReason);
         }
 
         text = cleanJsonText(text);
+
+        if (!looksLikeCompleteJsonObject(text)) {
+            throw new RuntimeException(
+                    "Gemini returned an incomplete JSON object, finishReason=" + finishReason +
+                            ", textLength=" + text.length()
+            );
+        }
 
         try {
             @SuppressWarnings("unchecked")
@@ -568,6 +626,53 @@ public class AiMealPlanService {
         return cleaned;
     }
 
+    private boolean looksLikeCompleteJsonObject(String text) {
+        if (text == null) {
+            return false;
+        }
+
+        String value = text.trim();
+        if (!value.startsWith("{") || !value.endsWith("}")) {
+            return false;
+        }
+
+        int braceCount = 0;
+        boolean inString = false;
+        boolean escaped = false;
+
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+
+            if (c == '\\') {
+                escaped = true;
+                continue;
+            }
+
+            if (c == '"') {
+                inString = !inString;
+                continue;
+            }
+
+            if (!inString) {
+                if (c == '{') {
+                    braceCount++;
+                } else if (c == '}') {
+                    braceCount--;
+                    if (braceCount < 0) {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        return braceCount == 0 && !inString;
+    }
+
     private String extractFirstJsonObject(String text) {
         if (text == null) {
             return null;
@@ -616,25 +721,93 @@ public class AiMealPlanService {
 
         return null;
     }
+    private int getRequestedDays(MealPlanGenerateRequest request) {
+        if (request == null) {
+            return 1;
+        }
+
+        try {
+            Object value = request.getClass().getMethod("getDays").invoke(request);
+            int days = (int) Math.round(numberValue(value));
+
+            if (days <= 0) {
+                return 1;
+            }
+
+            return Math.max(1, Math.min(days, 7));
+        } catch (Exception ignored) {
+            return 1;
+        }
+    }
 
     @SuppressWarnings("unchecked")
-    private void ensureMealLanguageFields(Map<String, Object> result) {
+    private List<Map<String, Object>> collectPlanMaps(Map<String, Object> result) {
+        List<Map<String, Object>> plans = new ArrayList<Map<String, Object>>();
+
         if (result == null) {
+            return plans;
+        }
+
+        Object singlePlanObj = result.get("plan");
+        if (singlePlanObj instanceof Map) {
+            plans.add((Map<String, Object>) singlePlanObj);
+        }
+
+        addPlanMapsFromList(result.get("plans"), plans);
+        addPlanMapsFromList(result.get("mealPlans"), plans);
+        addPlanMapsFromList(result.get("days"), plans);
+
+        return plans;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void addPlanMapsFromList(Object listObj, List<Map<String, Object>> plans) {
+        if (!(listObj instanceof List) || plans == null) {
             return;
         }
 
-        Object planObj = result.get("plan");
+        List<Object> items = (List<Object>) listObj;
 
-        if (!(planObj instanceof Map)) {
-            return;
+        for (Object itemObj : items) {
+            if (!(itemObj instanceof Map)) {
+                continue;
+            }
+
+            Map<String, Object> item = (Map<String, Object>) itemObj;
+            Object nestedPlanObj = item.get("plan");
+
+            if (!(nestedPlanObj instanceof Map)) {
+                nestedPlanObj = item.get("mealPlan");
+            }
+
+            if (nestedPlanObj instanceof Map) {
+                plans.add((Map<String, Object>) nestedPlanObj);
+            } else if (looksLikeDayPlan(item)) {
+                plans.add(item);
+            }
+        }
+    }
+
+    private boolean looksLikeDayPlan(Map<String, Object> map) {
+        if (map == null) {
+            return false;
         }
 
-        Map<String, Object> plan = (Map<String, Object>) planObj;
+        return map.containsKey("breakfast")
+                || map.containsKey("lunch")
+                || map.containsKey("dinner")
+                || map.containsKey("snack");
+    }
+    @SuppressWarnings("unchecked")
+    private void ensureMealLanguageFields(Map<String, Object> result) {
+        List<Map<String, Object>> plans = collectPlanMaps(result);
 
-        ensureMealLanguageField(plan.get("breakfast"));
-        ensureMealLanguageField(plan.get("lunch"));
-        ensureMealLanguageField(plan.get("dinner"));
-        ensureMealLanguageField(plan.get("snack"));
+        for (Map<String, Object> plan : plans) {
+            ensureMealLanguageField(plan.get("breakfast"));
+            ensureMealLanguageField(plan.get("lunch"));
+            ensureMealLanguageField(plan.get("dinner"));
+            ensureMealLanguageField(plan.get("snack"));
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -682,25 +855,16 @@ public class AiMealPlanService {
 
         return String.valueOf(value).trim();
     }
-
     @SuppressWarnings("unchecked")
     private void ensureMealIconFields(Map<String, Object> result) {
-        if (result == null) {
-            return;
+        List<Map<String, Object>> plans = collectPlanMaps(result);
+
+        for (Map<String, Object> plan : plans) {
+            ensureMealIconField(plan.get("breakfast"));
+            ensureMealIconField(plan.get("lunch"));
+            ensureMealIconField(plan.get("dinner"));
+            ensureMealIconField(plan.get("snack"));
         }
-
-        Object planObj = result.get("plan");
-
-        if (!(planObj instanceof Map)) {
-            return;
-        }
-
-        Map<String, Object> plan = (Map<String, Object>) planObj;
-
-        ensureMealIconField(plan.get("breakfast"));
-        ensureMealIconField(plan.get("lunch"));
-        ensureMealIconField(plan.get("dinner"));
-        ensureMealIconField(plan.get("snack"));
     }
 
     @SuppressWarnings("unchecked")
@@ -743,25 +907,16 @@ public class AiMealPlanService {
             meal.put("mealIconPrompt", buildMealIconPrompt(mealName));
         }
     }
-
     @SuppressWarnings("unchecked")
     private void ensureYoutubeSearchLinks(Map<String, Object> result) {
-        if (result == null) {
-            return;
+        List<Map<String, Object>> plans = collectPlanMaps(result);
+
+        for (Map<String, Object> plan : plans) {
+            ensureYoutubeSearchLink(plan.get("breakfast"));
+            ensureYoutubeSearchLink(plan.get("lunch"));
+            ensureYoutubeSearchLink(plan.get("dinner"));
+            ensureYoutubeSearchLink(plan.get("snack"));
         }
-
-        Object planObj = result.get("plan");
-
-        if (!(planObj instanceof Map)) {
-            return;
-        }
-
-        Map<String, Object> plan = (Map<String, Object>) planObj;
-
-        ensureYoutubeSearchLink(plan.get("breakfast"));
-        ensureYoutubeSearchLink(plan.get("lunch"));
-        ensureYoutubeSearchLink(plan.get("dinner"));
-        ensureYoutubeSearchLink(plan.get("snack"));
     }
 
     @SuppressWarnings("unchecked")
@@ -790,25 +945,16 @@ public class AiMealPlanService {
 
         meal.put("strYoutube", buildYoutubeSearchUrl(mealName));
     }
-
     @SuppressWarnings("unchecked")
     private Map<String, Object> sanitizeMealPlanUrls(Map<String, Object> result) {
-        if (result == null) {
-            return result;
+        List<Map<String, Object>> plans = collectPlanMaps(result);
+
+        for (Map<String, Object> plan : plans) {
+            sanitizeMealUrl(plan.get("breakfast"));
+            sanitizeMealUrl(plan.get("lunch"));
+            sanitizeMealUrl(plan.get("dinner"));
+            sanitizeMealUrl(plan.get("snack"));
         }
-
-        Object planObj = result.get("plan");
-
-        if (!(planObj instanceof Map)) {
-            return result;
-        }
-
-        Map<String, Object> plan = (Map<String, Object>) planObj;
-
-        sanitizeMealUrl(plan.get("breakfast"));
-        sanitizeMealUrl(plan.get("lunch"));
-        sanitizeMealUrl(plan.get("dinner"));
-        sanitizeMealUrl(plan.get("snack"));
 
         return result;
     }
@@ -900,21 +1046,29 @@ public class AiMealPlanService {
             return "https://www.youtube.com/results?search_query=recipe+tutorial";
         }
     }
-
-
     @SuppressWarnings("unchecked")
     private Map<String, Object> enforceMealPlanTargetLimits(Map<String, Object> result, MealPlanGenerateRequest request) {
         if (result == null) {
             return result;
         }
 
-        Object planObj = result.get("plan");
+        List<Map<String, Object>> plans = collectPlanMaps(result);
 
-        if (!(planObj instanceof Map)) {
-            return result;
+        for (int dayIndex = 0; dayIndex < plans.size(); dayIndex++) {
+            enforceSingleDayTargetLimits(plans.get(dayIndex), request, dayIndex + 1);
         }
 
-        Map<String, Object> plan = (Map<String, Object>) planObj;
+        return result;
+    }
+
+    private void enforceSingleDayTargetLimits(
+            Map<String, Object> plan,
+            MealPlanGenerateRequest request,
+            int dayNumber
+    ) {
+        if (plan == null) {
+            return;
+        }
 
         double targetCarbs = normalizeTarget(request == null ? null : request.getTargetCarbs(), 155.0);
         double targetProtein = normalizeTarget(request == null ? null : request.getTargetProtein(), 32.0);
@@ -928,7 +1082,7 @@ public class AiMealPlanService {
         double targetFillRatio = 0.995;
         double maxRatio = 0.999;
 
-        // First, reduce if Gemini returned a plan that is over any target.
+        // First, reduce if AI returned a plan that is over any target.
         reducePlanIfOverTargets(plan, mealKeys, targetCarbs, targetProtein, targetFat, maxRatio);
 
         // Then fill missing macros by increasing the most suitable existing ingredients.
@@ -965,7 +1119,8 @@ public class AiMealPlanService {
         double[] after = recalculatePlanAndGetTotals(plan, mealKeys);
 
         log.info(
-                "AI meal plan macros balanced. Before carbs/protein/fat: {}/{}/{}. Target: {}/{}/{}. After: {}/{}/{}",
+                "AI meal plan day {} macros balanced. Before carbs/protein/fat: {}/{}/{}. Target: {}/{}/{}. After: {}/{}/{}",
+                dayNumber,
                 roundOne(before[0]),
                 roundOne(before[1]),
                 roundOne(before[2]),
@@ -976,8 +1131,6 @@ public class AiMealPlanService {
                 roundOne(after[1]),
                 roundOne(after[2])
         );
-
-        return result;
     }
 
 
@@ -1242,6 +1395,19 @@ public class AiMealPlanService {
         return new double[] {carbs, protein, fat};
     }
 
+    private int normalizeRequestedDays(MealPlanGenerateRequest request) {
+        if (request == null || request.getDays() == null) {
+            return 1;
+        }
+
+        int days = request.getDays().intValue();
+        if (days < 1) {
+            return 1;
+        }
+
+        return Math.min(days, 7);
+    }
+
     private double normalizeTarget(Double value, double fallback) {
         if (value == null || value.doubleValue() <= 0 || Double.isNaN(value.doubleValue()) || Double.isInfinite(value.doubleValue())) {
             return fallback;
@@ -1346,10 +1512,34 @@ public class AiMealPlanService {
     private double roundOne(double value) {
         return Math.round(value * 10.0) / 10.0;
     }
-
     private Map<String, Object> fallbackMealPlan(MealPlanGenerateRequest request) {
+        int requestedDays = getRequestedDays(request);
+
+        if (requestedDays <= 1) {
+            Map<String, Object> result = new HashMap<String, Object>();
+            result.put("plan", buildFallbackDayPlan(1));
+            return result;
+        }
+
+        List<Map<String, Object>> plans = new ArrayList<Map<String, Object>>();
+
+        for (int day = 1; day <= requestedDays; day++) {
+            Map<String, Object> dayWrapper = new HashMap<String, Object>();
+            dayWrapper.put("day", day);
+            dayWrapper.put("plan", buildFallbackDayPlan(day));
+            plans.add(dayWrapper);
+        }
+
+        Map<String, Object> result = new HashMap<String, Object>();
+        result.put("plans", plans);
+        return result;
+    }
+
+    private Map<String, Object> buildFallbackDayPlan(int dayNumber) {
+        String suffix = dayNumber <= 1 ? "" : "-day" + dayNumber;
+
         Map<String, Object> breakfast = meal(
-                "ai-breakfast",
+                "ai-breakfast" + suffix,
                 "Scrambled Eggs with Toast",
                 "Breakfast",
                 320,
@@ -1364,7 +1554,7 @@ public class AiMealPlanService {
         );
 
         Map<String, Object> lunch = meal(
-                "ai-lunch",
+                "ai-lunch" + suffix,
                 "Chicken Rice with Vegetables",
                 "Lunch",
                 520,
@@ -1379,7 +1569,7 @@ public class AiMealPlanService {
         );
 
         Map<String, Object> dinner = meal(
-                "ai-dinner",
+                "ai-dinner" + suffix,
                 "Fish Soup with Rice",
                 "Dinner",
                 430,
@@ -1394,7 +1584,7 @@ public class AiMealPlanService {
         );
 
         Map<String, Object> snack = meal(
-                "ai-snack",
+                "ai-snack" + suffix,
                 "Yogurt with Banana",
                 "Snack",
                 210,
@@ -1413,10 +1603,7 @@ public class AiMealPlanService {
         plan.put("dinner", dinner);
         plan.put("snack", snack);
 
-        Map<String, Object> result = new HashMap<String, Object>();
-        result.put("plan", plan);
-
-        return result;
+        return plan;
     }
 
     private Map<String, Object> meal(
