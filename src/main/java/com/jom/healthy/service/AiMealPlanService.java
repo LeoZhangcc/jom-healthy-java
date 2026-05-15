@@ -381,27 +381,29 @@ public class AiMealPlanService {
         prompt.append("- protein: ").append(targetProtein).append("g\n");
         prompt.append("- fat: ").append(targetFat).append("g\n\n");
 
-        prompt.append("Macro balancing rules for EACH day:\n");
-        prompt.append("- For every day, total carbohydrates across its four meals must be between ")
-                .append(roundOne(targetCarbs * 0.98))
-                .append("g and ")
-                .append(targetCarbs)
-                .append("g, and never exceed the target.\n");
-        prompt.append("- For every day, total protein across its four meals must be between ")
-                .append(roundOne(targetProtein * 0.98))
-                .append("g and ")
-                .append(targetProtein)
-                .append("g, and never exceed the target.\n");
-        prompt.append("- For every day, total fat across its four meals must be between ")
-                .append(roundOne(targetFat * 0.98))
-                .append("g and ")
-                .append(targetFat)
-                .append("g, and never exceed the target.\n");
-        prompt.append("- Adjust ingredient gramsEstimated and measure to meet the targets for each day.\n");
-        prompt.append("- After adjustment, recalculate ingredient energyKcal, proteinG, carbohydrateG, fatG.\n");
-        prompt.append("- Each meal totalEnergyKcal, totalProteinG, totalCarbohydrateG, totalFatG must equal the sum of its ingredients.\n");
+//        prompt.append("Macro balancing rules for EACH day:\n");
+//        prompt.append("- For every day, total carbohydrates across its four meals must be between ")
+//                .append(roundOne(targetCarbs * 0.98))
+//                .append("g and ")
+//                .append(targetCarbs)
+//                .append("g, and never exceed the target.\n");
+//        prompt.append("- For every day, total protein across its four meals must be between ")
+//                .append(roundOne(targetProtein * 0.98))
+//                .append("g and ")
+//                .append(targetProtein)
+//                .append("g, and never exceed the target.\n");
+//        prompt.append("- For every day, total fat across its four meals must be between ")
+//                .append(roundOne(targetFat * 0.98))
+//                .append("g and ")
+//                .append(targetFat)
+//                .append("g, and never exceed the target.\n");
+//        prompt.append("- Adjust ingredient gramsEstimated and measure to meet the targets for each day.\n");
+//        prompt.append("- After adjustment, recalculate ingredient energyKcal, proteinG, carbohydrateG, fatG.\n");
+        prompt.append("- Daily totals across all four meals should be close to the daily targets. Do not force every individual meal to equal the full daily target.\n");
+        prompt.append("- Each meal totalEnergyKcal, totalProteinG, totalCarbohydrateG, and totalFatG must equal the sum of its ingredients.\n");
         prompt.append("- Do not return unrealistic portions or all-zero nutrition values.\n");
         prompt.append("- Keep the JSON compact. Avoid unnecessarily long prose, long marketing wording, or repeated explanations.\n\n");
+        prompt.append("- Check each day's combined macro totals multiple times before returning. Keep the ingredient nutrition values internally consistent.\n\n");
 
         prompt.append("Multilingual rules:\n");
         prompt.append("- Each meal must include English, Simplified Chinese, and Malay display fields.\n");
@@ -1077,49 +1079,18 @@ public class AiMealPlanService {
         String[] mealKeys = new String[] {"breakfast", "lunch", "dinner", "snack"};
         double[] before = recalculatePlanAndGetTotals(plan, mealKeys);
 
-        // The ideal result is close to the target, but still not above it.
-        // 99.5% gives a small rounding buffer while looking equal in the app UI.
-        double targetFillRatio = 0.995;
-        double maxRatio = 0.999;
-
-        // First, reduce if AI returned a plan that is over any target.
-        reducePlanIfOverTargets(plan, mealKeys, targetCarbs, targetProtein, targetFat, maxRatio);
-
-        // Then fill missing macros by increasing the most suitable existing ingredients.
-        // Repeat because increasing one macro can slightly affect the others.
-        for (int i = 0; i < 12; i++) {
-            reducePlanIfOverTargets(plan, mealKeys, targetCarbs, targetProtein, targetFat, maxRatio);
-
-            double[] totals = recalculatePlanAndGetTotals(plan, mealKeys);
-            int macroToFill = findMostMissingMacro(totals, targetCarbs, targetProtein, targetFat, targetFillRatio);
-
-            if (macroToFill < 0) {
-                break;
-            }
-
-            boolean changed = increaseDominantMacroIngredients(
-                    plan,
-                    mealKeys,
-                    macroToFill,
-                    targetCarbs,
-                    targetProtein,
-                    targetFat,
-                    targetFillRatio,
-                    maxRatio
-            );
-
-            if (!changed) {
-                break;
-            }
-        }
-
-        // Final safety pass: never let totals exceed the target after rounding.
-        reducePlanIfOverTargets(plan, mealKeys, targetCarbs, targetProtein, targetFat, maxRatio);
+        int iterations = optimizeSingleDayMacroTargets(
+                plan,
+                mealKeys,
+                targetCarbs,
+                targetProtein,
+                targetFat
+        );
 
         double[] after = recalculatePlanAndGetTotals(plan, mealKeys);
 
         log.info(
-                "AI meal plan day {} macros balanced. Before carbs/protein/fat: {}/{}/{}. Target: {}/{}/{}. After: {}/{}/{}",
+                "AI meal plan day {} macros optimized. Before carbs/protein/fat: {}/{}/{}. Target: {}/{}/{}. After: {}/{}/{}. Error: {}/{}/{}. Iterations:{}",
                 dayNumber,
                 roundOne(before[0]),
                 roundOne(before[1]),
@@ -1129,10 +1100,282 @@ public class AiMealPlanService {
                 targetFat,
                 roundOne(after[0]),
                 roundOne(after[1]),
-                roundOne(after[2])
+                roundOne(after[2]),
+                roundOne(after[0] - targetCarbs),
+                roundOne(after[1] - targetProtein),
+                roundOne(after[2] - targetFat),
+                iterations
         );
     }
 
+    /*
+     * The old logic scaled the whole day by whichever macro was most over target.
+     * That could make fat accurate but push carbs/protein far below target.
+     *
+     * This optimizer adjusts individual ingredient weights instead.
+     * At each step it picks the single gram adjustment that most reduces the
+     * normalized squared error of carbs, protein, and fat together.
+     */
+    @SuppressWarnings("unchecked")
+    private int optimizeSingleDayMacroTargets(
+            Map<String, Object> plan,
+            String[] mealKeys,
+            double targetCarbs,
+            double targetProtein,
+            double targetFat
+    ) {
+        List<MacroIngredientCandidate> candidates = collectAdjustableMacroIngredients(plan, mealKeys);
+
+        if (candidates.size() == 0) {
+            recalculatePlanAndGetTotals(plan, mealKeys);
+            return 0;
+        }
+
+        final int maxIterations = 800;
+        final double toleranceGrams = 0.35;
+        final double minImprovement = 0.00000001;
+
+        int iterations = 0;
+
+        for (; iterations < maxIterations; iterations++) {
+            double[] totals = recalculatePlanAndGetTotals(plan, mealKeys);
+
+            if (isWithinMacroTolerance(
+                    totals,
+                    targetCarbs,
+                    targetProtein,
+                    targetFat,
+                    toleranceGrams
+            )) {
+                break;
+            }
+
+            double currentScore = normalizedMacroErrorScore(
+                    totals,
+                    targetCarbs,
+                    targetProtein,
+                    targetFat
+            );
+
+            MacroIngredientCandidate bestCandidate = null;
+            double bestDeltaGrams = 0.0;
+            double bestScore = currentScore;
+
+            for (MacroIngredientCandidate candidate : candidates) {
+                double rawDelta = calculateBestGramDeltaForCandidate(
+                        candidate,
+                        totals,
+                        targetCarbs,
+                        targetProtein,
+                        targetFat
+                );
+
+                double boundedDelta = boundCandidateDelta(candidate, rawDelta);
+
+                if (Math.abs(boundedDelta) < 0.02) {
+                    continue;
+                }
+
+                double[] projectedTotals = new double[] {
+                        totals[0] + candidate.carbsPerGram * boundedDelta,
+                        totals[1] + candidate.proteinPerGram * boundedDelta,
+                        totals[2] + candidate.fatPerGram * boundedDelta
+                };
+
+                double projectedScore = normalizedMacroErrorScore(
+                        projectedTotals,
+                        targetCarbs,
+                        targetProtein,
+                        targetFat
+                );
+
+                if (projectedScore + minImprovement < bestScore) {
+                    bestCandidate = candidate;
+                    bestDeltaGrams = boundedDelta;
+                    bestScore = projectedScore;
+                }
+            }
+
+            if (bestCandidate == null) {
+                break;
+            }
+
+            applyCandidateDelta(bestCandidate, bestDeltaGrams);
+        }
+
+        recalculatePlanAndGetTotals(plan, mealKeys);
+        return iterations;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<MacroIngredientCandidate> collectAdjustableMacroIngredients(
+            Map<String, Object> plan,
+            String[] mealKeys
+    ) {
+        List<MacroIngredientCandidate> candidates = new ArrayList<MacroIngredientCandidate>();
+
+        for (String key : mealKeys) {
+            Object mealObj = plan.get(key);
+
+            if (!(mealObj instanceof Map)) {
+                continue;
+            }
+
+            Map<String, Object> meal = (Map<String, Object>) mealObj;
+            Object ingredientsObj = meal.get("ingredients");
+
+            if (!(ingredientsObj instanceof List)) {
+                continue;
+            }
+
+            List<Object> ingredients = (List<Object>) ingredientsObj;
+
+            for (Object ingredientObj : ingredients) {
+                if (!(ingredientObj instanceof Map)) {
+                    continue;
+                }
+
+                Map<String, Object> ingredient = (Map<String, Object>) ingredientObj;
+                double grams = numberValue(ingredient.get("gramsEstimated"));
+
+                if (grams <= 0.0) {
+                    continue;
+                }
+
+                double carbs = numberValue(ingredient.get("carbohydrateG"));
+                double protein = numberValue(ingredient.get("proteinG"));
+                double fat = numberValue(ingredient.get("fatG"));
+                double kcal = numberValue(ingredient.get("energyKcal"));
+
+                if (carbs <= 0.0 && protein <= 0.0 && fat <= 0.0) {
+                    continue;
+                }
+
+                double carbsPerGram = carbs / grams;
+                double proteinPerGram = protein / grams;
+                double fatPerGram = fat / grams;
+                double kcalPerGram = kcal / grams;
+
+                if (!isFinitePositiveOrZero(carbsPerGram)
+                        || !isFinitePositiveOrZero(proteinPerGram)
+                        || !isFinitePositiveOrZero(fatPerGram)
+                        || !isFinitePositiveOrZero(kcalPerGram)) {
+                    continue;
+                }
+
+                candidates.add(new MacroIngredientCandidate(
+                        ingredient,
+                        grams,
+                        carbsPerGram,
+                        proteinPerGram,
+                        fatPerGram,
+                        kcalPerGram
+                ));
+            }
+        }
+
+        return candidates;
+    }
+
+    private double calculateBestGramDeltaForCandidate(
+            MacroIngredientCandidate candidate,
+            double[] totals,
+            double targetCarbs,
+            double targetProtein,
+            double targetFat
+    ) {
+        double safeTargetCarbs = Math.max(targetCarbs, 1.0);
+        double safeTargetProtein = Math.max(targetProtein, 1.0);
+        double safeTargetFat = Math.max(targetFat, 1.0);
+
+        double errorCarbs = (targetCarbs - totals[0]) / safeTargetCarbs;
+        double errorProtein = (targetProtein - totals[1]) / safeTargetProtein;
+        double errorFat = (targetFat - totals[2]) / safeTargetFat;
+
+        double vectorCarbs = candidate.carbsPerGram / safeTargetCarbs;
+        double vectorProtein = candidate.proteinPerGram / safeTargetProtein;
+        double vectorFat = candidate.fatPerGram / safeTargetFat;
+
+        double denominator =
+                vectorCarbs * vectorCarbs
+                        + vectorProtein * vectorProtein
+                        + vectorFat * vectorFat;
+
+        if (denominator <= 0.0) {
+            return 0.0;
+        }
+
+        return (
+                errorCarbs * vectorCarbs
+                        + errorProtein * vectorProtein
+                        + errorFat * vectorFat
+        ) / denominator;
+    }
+
+    private double boundCandidateDelta(MacroIngredientCandidate candidate, double rawDelta) {
+        if (Double.isNaN(rawDelta) || Double.isInfinite(rawDelta)) {
+            return 0.0;
+        }
+
+        double maxStep = Math.max(6.0, Math.min(80.0, candidate.currentGrams * 0.35));
+        double delta = Math.max(-maxStep, Math.min(maxStep, rawDelta));
+
+        double minimumGrams = 1.0;
+        double maximumGrams = candidate.maximumGrams();
+
+        if (candidate.currentGrams + delta < minimumGrams) {
+            delta = minimumGrams - candidate.currentGrams;
+        }
+
+        if (candidate.currentGrams + delta > maximumGrams) {
+            delta = maximumGrams - candidate.currentGrams;
+        }
+
+        return delta;
+    }
+
+    private void applyCandidateDelta(MacroIngredientCandidate candidate, double deltaGrams) {
+        double nextGrams = candidate.currentGrams + deltaGrams;
+        nextGrams = Math.max(1.0, Math.min(nextGrams, candidate.maximumGrams()));
+        nextGrams = roundOne(nextGrams);
+
+        candidate.currentGrams = nextGrams;
+
+        Map<String, Object> ingredient = candidate.ingredient;
+        ingredient.put("gramsEstimated", nextGrams);
+        ingredient.put("measure", formatGramMeasure(nextGrams));
+        ingredient.put("energyKcal", roundOne(candidate.kcalPerGram * nextGrams));
+        ingredient.put("proteinG", roundOne(candidate.proteinPerGram * nextGrams));
+        ingredient.put("carbohydrateG", roundOne(candidate.carbsPerGram * nextGrams));
+        ingredient.put("fatG", roundOne(candidate.fatPerGram * nextGrams));
+    }
+
+    private boolean isWithinMacroTolerance(
+            double[] totals,
+            double targetCarbs,
+            double targetProtein,
+            double targetFat,
+            double toleranceGrams
+    ) {
+        return Math.abs(totals[0] - targetCarbs) <= toleranceGrams
+                && Math.abs(totals[1] - targetProtein) <= toleranceGrams
+                && Math.abs(totals[2] - targetFat) <= toleranceGrams;
+    }
+
+    private double normalizedMacroErrorScore(
+            double[] totals,
+            double targetCarbs,
+            double targetProtein,
+            double targetFat
+    ) {
+        double carbsError = (totals[0] - targetCarbs) / Math.max(targetCarbs, 1.0);
+        double proteinError = (totals[1] - targetProtein) / Math.max(targetProtein, 1.0);
+        double fatError = (totals[2] - targetFat) / Math.max(targetFat, 1.0);
+
+        return carbsError * carbsError
+                + proteinError * proteinError
+                + fatError * fatError;
+    }
 
     @SuppressWarnings("unchecked")
     private double[] recalculatePlanAndGetTotals(Map<String, Object> plan, String[] mealKeys) {
@@ -1158,241 +1401,49 @@ public class AiMealPlanService {
         return new double[] {carbs, protein, fat};
     }
 
-    @SuppressWarnings("unchecked")
-    private void reducePlanIfOverTargets(
-            Map<String, Object> plan,
-            String[] mealKeys,
-            double targetCarbs,
-            double targetProtein,
-            double targetFat,
-            double maxRatio
-    ) {
-        double[] totals = recalculatePlanAndGetTotals(plan, mealKeys);
-
-        double scale = 1.0;
-
-        if (totals[0] > targetCarbs && totals[0] > 0) {
-            scale = Math.min(scale, (targetCarbs * maxRatio) / totals[0]);
-        }
-
-        if (totals[1] > targetProtein && totals[1] > 0) {
-            scale = Math.min(scale, (targetProtein * maxRatio) / totals[1]);
-        }
-
-        if (totals[2] > targetFat && totals[2] > 0) {
-            scale = Math.min(scale, (targetFat * maxRatio) / totals[2]);
-        }
-
-        if (scale >= 0.9999) {
-            return;
-        }
-
-        scale = Math.max(0.05, Math.min(1.0, scale));
-
-        for (String key : mealKeys) {
-            Object mealObj = plan.get(key);
-
-            if (mealObj instanceof Map) {
-                scaleMealNutrition((Map<String, Object>) mealObj, scale);
-            }
-        }
+    private boolean isFinitePositiveOrZero(double value) {
+        return !Double.isNaN(value) && !Double.isInfinite(value) && value >= 0.0;
     }
 
-    private int findMostMissingMacro(
-            double[] totals,
-            double targetCarbs,
-            double targetProtein,
-            double targetFat,
-            double targetFillRatio
-    ) {
-        double carbsRatio = targetCarbs > 0 ? totals[0] / targetCarbs : 1.0;
-        double proteinRatio = targetProtein > 0 ? totals[1] / targetProtein : 1.0;
-        double fatRatio = targetFat > 0 ? totals[2] / targetFat : 1.0;
+    private String formatGramMeasure(double grams) {
+        double rounded = roundOne(Math.max(grams, 0.0));
 
-        int macroIndex = -1;
-        double lowestRatio = targetFillRatio;
-
-        if (carbsRatio < lowestRatio) {
-            lowestRatio = carbsRatio;
-            macroIndex = 0;
+        if (Math.abs(rounded - Math.round(rounded)) < 0.0001) {
+            return ((long) Math.round(rounded)) + "g";
         }
 
-        if (proteinRatio < lowestRatio) {
-            lowestRatio = proteinRatio;
-            macroIndex = 1;
-        }
-
-        if (fatRatio < lowestRatio) {
-            macroIndex = 2;
-        }
-
-        return macroIndex;
+        return rounded + "g";
     }
 
-    @SuppressWarnings("unchecked")
-    private boolean increaseDominantMacroIngredients(
-            Map<String, Object> plan,
-            String[] mealKeys,
-            int macroIndex,
-            double targetCarbs,
-            double targetProtein,
-            double targetFat,
-            double targetFillRatio,
-            double maxRatio
-    ) {
-        double[] totals = recalculatePlanAndGetTotals(plan, mealKeys);
-        double[] targets = new double[] {targetCarbs, targetProtein, targetFat};
-        double desiredMacroTotal = targets[macroIndex] * targetFillRatio;
-        double missing = desiredMacroTotal - totals[macroIndex];
+    private static class MacroIngredientCandidate {
+        private final Map<String, Object> ingredient;
+        private final double originalGrams;
+        private double currentGrams;
+        private final double carbsPerGram;
+        private final double proteinPerGram;
+        private final double fatPerGram;
+        private final double kcalPerGram;
 
-        if (missing <= 0) {
-            return false;
+        private MacroIngredientCandidate(
+                Map<String, Object> ingredient,
+                double grams,
+                double carbsPerGram,
+                double proteinPerGram,
+                double fatPerGram,
+                double kcalPerGram
+        ) {
+            this.ingredient = ingredient;
+            this.originalGrams = grams;
+            this.currentGrams = grams;
+            this.carbsPerGram = carbsPerGram;
+            this.proteinPerGram = proteinPerGram;
+            this.fatPerGram = fatPerGram;
+            this.kcalPerGram = kcalPerGram;
         }
 
-        List<Map<String, Object>> candidates = collectDominantMacroIngredients(plan, mealKeys, macroIndex, true);
-
-        if (candidates.size() == 0) {
-            candidates = collectDominantMacroIngredients(plan, mealKeys, macroIndex, false);
+        private double maximumGrams() {
+            return Math.max(originalGrams * 5.0, originalGrams + 300.0);
         }
-
-        if (candidates.size() == 0) {
-            return false;
-        }
-
-        double[] candidateTotals = ingredientListMacroTotals(candidates);
-
-        if (candidateTotals[macroIndex] <= 0) {
-            return false;
-        }
-
-        double desiredFactor = 1.0 + (missing / candidateTotals[macroIndex]);
-        double maxFactor = desiredFactor;
-
-        for (int i = 0; i < 3; i++) {
-            if (candidateTotals[i] <= 0) {
-                continue;
-            }
-
-            double allowedTotal = targets[i] * maxRatio;
-            double availableIncrease = allowedTotal - totals[i];
-
-            if (availableIncrease <= 0) {
-                return false;
-            }
-
-            maxFactor = Math.min(maxFactor, 1.0 + availableIncrease / candidateTotals[i]);
-        }
-
-        double factor = Math.min(desiredFactor, maxFactor);
-
-        // Avoid many tiny adjustments that cause noisy grams.
-        if (factor <= 1.005) {
-            return false;
-        }
-
-        // Do not suddenly double a child portion in one pass. The loop can adjust again.
-        factor = Math.min(factor, 1.35);
-
-        for (Map<String, Object> ingredient : candidates) {
-            scaleIngredientNutrition(ingredient, factor);
-        }
-
-        recalculatePlanAndGetTotals(plan, mealKeys);
-        return true;
-    }
-
-    @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> collectDominantMacroIngredients(
-            Map<String, Object> plan,
-            String[] mealKeys,
-            int macroIndex,
-            boolean strict
-    ) {
-        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
-
-        for (String key : mealKeys) {
-            Object mealObj = plan.get(key);
-
-            if (!(mealObj instanceof Map)) {
-                continue;
-            }
-
-            Object ingredientsObj = ((Map<String, Object>) mealObj).get("ingredients");
-
-            if (!(ingredientsObj instanceof List)) {
-                continue;
-            }
-
-            List<Object> ingredients = (List<Object>) ingredientsObj;
-
-            for (Object ingredientObj : ingredients) {
-                if (!(ingredientObj instanceof Map)) {
-                    continue;
-                }
-
-                Map<String, Object> ingredient = (Map<String, Object>) ingredientObj;
-
-                if (isMacroCandidate(ingredient, macroIndex, strict)) {
-                    result.add(ingredient);
-                }
-            }
-        }
-
-        return result;
-    }
-
-    private boolean isMacroCandidate(Map<String, Object> ingredient, int macroIndex, boolean strict) {
-        double carbs = numberValue(ingredient.get("carbohydrateG"));
-        double protein = numberValue(ingredient.get("proteinG"));
-        double fat = numberValue(ingredient.get("fatG"));
-
-        String text = (
-                stringValue(ingredient.get("foodGroup"), "") + " "
-                        + stringValue(ingredient.get("foodNameEn"), "") + " "
-                        + stringValue(ingredient.get("ingredientName"), "")
-        ).toLowerCase();
-
-        if (macroIndex == 0) {
-            if (carbs <= 0) return false;
-
-            if (containsAny(text, "carb", "grain", "rice", "bread", "noodle", "pasta", "oat", "potato", "fruit", "banana", "apple", "flour", "cereal")) {
-                return true;
-            }
-
-            return !strict && carbs >= protein && carbs >= fat;
-        }
-
-        if (macroIndex == 1) {
-            if (protein <= 0) return false;
-
-            if (containsAny(text, "protein", "meat", "chicken", "fish", "egg", "beef", "tofu", "bean", "lentil", "yogurt", "milk", "seafood", "prawn", "shrimp")) {
-                return true;
-            }
-
-            return !strict && protein >= carbs && protein >= fat;
-        }
-
-        if (fat <= 0) return false;
-
-        if (containsAny(text, "fat", "oil", "butter", "avocado", "nut", "peanut", "almond", "cashew", "egg", "milk", "yogurt", "cheese", "salmon", "fish")) {
-            return true;
-        }
-
-        return !strict && fat >= carbs && fat >= protein;
-    }
-
-    private double[] ingredientListMacroTotals(List<Map<String, Object>> ingredients) {
-        double carbs = 0.0;
-        double protein = 0.0;
-        double fat = 0.0;
-
-        for (Map<String, Object> ingredient : ingredients) {
-            carbs += numberValue(ingredient.get("carbohydrateG"));
-            protein += numberValue(ingredient.get("proteinG"));
-            fat += numberValue(ingredient.get("fatG"));
-        }
-
-        return new double[] {carbs, protein, fat};
     }
 
     private int normalizeRequestedDays(MealPlanGenerateRequest request) {
