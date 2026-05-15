@@ -28,6 +28,12 @@ public class AiMealPlanService {
     @Value("${GEMINI_API_KEY:}")
     private String geminiApiKey;
 
+    @Value("${GROQ_API_KEY:}")
+    private String groqApiKey;
+
+    @Value("${GROQ_MODEL:openai/gpt-oss-20b}")
+    private String groqModel;
+
     private final RestTemplate restTemplate = new RestTemplate();
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -125,6 +131,176 @@ public class AiMealPlanService {
         }
     }
 
+    public Object generateMealPlanByGroqTest(MealPlanGenerateRequest request) {
+        Map<String, Object> userMessage = new HashMap<String, Object>();
+        userMessage.put("role", "user");
+        userMessage.put("content", "Explain the importance of fast language models");
+
+        List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
+        messages.add(userMessage);
+
+        Map<String, Object> body = new HashMap<String, Object>();
+        body.put("messages", messages);
+        body.put("model", groqModel);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("Authorization", "Bearer " + groqApiKey.trim());
+        headers.set("Accept", "application/json");
+        headers.set(
+                "User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                        "(KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+        );
+
+        HttpEntity<Map<String, Object>> entity =
+                new HttpEntity<Map<String, Object>>(body, headers);
+
+        log.info("entity:{}", entity);
+
+        String url = "https://api.groq.com/openai/v1/chat/completions";
+
+        ResponseEntity<String> response = restTemplate.exchange(
+                url,
+                HttpMethod.POST,
+                entity,
+                String.class
+        );
+
+        log.info("Groq response: {}", response.getBody());
+        return null;
+    }
+
+    public Map<String, Object> generateMealPlanByGroq(MealPlanGenerateRequest request) {
+        log.info("generateMealPlanByGroq start=====request:{}", request);
+        long startTime = System.currentTimeMillis();
+
+        try {
+            if (groqApiKey == null || groqApiKey.trim().length() == 0) {
+                throw new RuntimeException("GROQ_API_KEY is empty");
+            }
+
+            log.info("generateMealPlanByGroq =====groqModel:{}", groqModel);
+
+            String prompt = buildPrompt(request);
+
+            Map<String, Object> systemMessage = new HashMap<String, Object>();
+            systemMessage.put("role", "system");
+            systemMessage.put(
+                    "content",
+                    "You are a child nutrition meal planning assistant. " +
+                            "Return one strictly valid JSON object only. " +
+                            "Do not return markdown, code fences, or extra explanations."
+            );
+
+            Map<String, Object> userMessage = new HashMap<String, Object>();
+            userMessage.put("role", "user");
+            userMessage.put("content", prompt);
+
+            List<Map<String, Object>> messages = new ArrayList<Map<String, Object>>();
+            messages.add(systemMessage);
+            messages.add(userMessage);
+
+            Map<String, Object> body = new HashMap<String, Object>();
+            body.put("model", groqModel);
+            body.put("messages", messages);
+            body.put("temperature", 0.5);
+            body.put("max_completion_tokens", 6000);
+            body.put("reasoning_effort", "low");
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("Authorization", "Bearer " + groqApiKey.trim());
+            headers.set("Accept", "application/json");
+
+            // Required in your environment, otherwise Groq was blocked by Cloudflare 1010
+            headers.set(
+                    "User-Agent",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                            "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                            "Chrome/148.0.0.0 Safari/537.36"
+            );
+
+            HttpEntity<Map<String, Object>> entity =
+                    new HttpEntity<Map<String, Object>>(body, headers);
+
+            log.info(
+                    "generateMealPlanByGroq request ready=====promptLength:{}, maxCompletionTokens:{}",
+                    prompt == null ? 0 : prompt.length(),
+                    8192
+            );
+
+            String url = "https://api.groq.com/openai/v1/chat/completions";
+
+            ResponseEntity<String> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.POST,
+                    entity,
+                    String.class
+            );
+
+            log.info(
+                    "generateMealPlanByGroq response received=====status:{}",
+                    response.getStatusCode()
+            );
+
+            Map<String, Object> result = parseGroqResponse(response.getBody());
+            enforceMealPlanTargetLimits(result, request);
+
+            long costMs = System.currentTimeMillis() - startTime;
+            log.info(
+                    "generateMealPlanByGroq end=====took:{}ms, model:{}",
+                    costMs,
+                    groqModel
+            );
+
+            return result;
+
+        } catch (HttpClientErrorException e) {
+            long costMs = System.currentTimeMillis() - startTime;
+
+            log.error(
+                    "Groq HTTP client error after {}ms, status: {}, response body: {}",
+                    costMs,
+                    e.getStatusCode(),
+                    e.getResponseBodyAsString(),
+                    e
+            );
+
+            Map<String, Object> fallback = fallbackMealPlan(request);
+            enforceMealPlanTargetLimits(fallback, request);
+            return fallback;
+
+        } catch (HttpServerErrorException e) {
+            long costMs = System.currentTimeMillis() - startTime;
+
+            log.error(
+                    "Groq HTTP server error after {}ms, status: {}, response body: {}",
+                    costMs,
+                    e.getStatusCode(),
+                    e.getResponseBodyAsString(),
+                    e
+            );
+
+            Map<String, Object> fallback = fallbackMealPlan(request);
+            enforceMealPlanTargetLimits(fallback, request);
+            return fallback;
+
+        } catch (Exception e) {
+            long costMs = System.currentTimeMillis() - startTime;
+
+            log.error(
+                    "generateMealPlanByGroq error after {}ms, fallback returned",
+                    costMs,
+                    e
+            );
+
+            Map<String, Object> fallback = fallbackMealPlan(request);
+            enforceMealPlanTargetLimits(fallback, request);
+            return fallback;
+        }
+    }
+
     private String buildPrompt(MealPlanGenerateRequest request) {
         String childName = safeString(request.getChildName(), "Guest");
         Integer age = request.getAge() == null ? 7 : request.getAge();
@@ -147,22 +323,23 @@ public class AiMealPlanService {
         String mealPreference = safeString(request.getMealPreference(), "");
 
         String preferenceInstruction;
-
         if (mealPreference.trim().length() > 0) {
             preferenceInstruction =
-                    "The user wants to eat or include these foods: "
-                            + mealPreference
-                            + ". Try to include them if they are safe and suitable.";
+                    "Try to include these foods when safe and suitable: " + mealPreference + ".";
         } else {
             preferenceInstruction =
-                    "The user did not enter any food preference. Recommend meals based on the child profile, allergies, restrictions, and nutrition targets.";
+                    "No specific food preference was provided. Recommend meals based on the child profile, allergies, restrictions, and nutrition targets.";
         }
 
         StringBuilder prompt = new StringBuilder();
 
-        prompt.append("You are a child nutrition meal planning assistant.\n\n");
+        prompt.append("You are a child nutrition meal planning assistant.\n");
+        prompt.append("Return one strictly valid JSON object only. No markdown, no comments, no extra text.\n\n");
 
-        prompt.append("Generate a 1-day meal plan for a child.\n\n");
+        prompt.append("Task:\n");
+        prompt.append("Generate a 1-day meal plan with exactly four meals: breakfast, lunch, dinner, and snack.\n");
+        prompt.append("Use real, common, child-friendly recipes. Prefer Malaysian or family-friendly meals.\n");
+        prompt.append("Avoid allergies and dietary restrictions. Use realistic child-sized portions.\n\n");
 
         prompt.append("Child profile:\n");
         prompt.append("- name: ").append(childName).append("\n");
@@ -171,188 +348,76 @@ public class AiMealPlanService {
         prompt.append("- heightCm: ").append(heightCm).append("\n");
         prompt.append("- weightKg: ").append(weightKg).append("\n");
         prompt.append("- allergies: ").append(allergies).append("\n");
-        prompt.append("- restrictions: ").append(restrictions).append("\n\n");
+        prompt.append("- restrictions: ").append(restrictions).append("\n");
+        prompt.append("- mealPreference: ").append(preferenceInstruction).append("\n\n");
 
-        prompt.append("User meal preference:\n");
-        prompt.append(preferenceInstruction).append("\n\n");
-
-        prompt.append("Daily nutrition targets:\n");
-        prompt.append("- carbs: ").append(targetCarbs).append("g\n");
+        prompt.append("Daily macro targets:\n");
+        prompt.append("- carbohydrates: ").append(targetCarbs).append("g\n");
         prompt.append("- protein: ").append(targetProtein).append("g\n");
         prompt.append("- fat: ").append(targetFat).append("g\n\n");
 
-        prompt.append("Recipe selection rules:\n");
-        prompt.append("1. Use real, common recipe names.\n");
-        prompt.append("2. Prefer Malaysian or family-friendly meals.\n");
-        prompt.append("3. Avoid vague names like Healthy Breakfast Bowl unless it is a well-known recipe.\n");
-        prompt.append("4. Avoid allergies and dietary restrictions.\n");
-        prompt.append("5. Make meals suitable for children.\n");
-        prompt.append("6. The full-day macro totals should be almost equal to the daily targets after portion adjustment.\n\n");
+        prompt.append("Macro balancing rules:\n");
+        prompt.append("- Total carbohydrates across all four meals must be between ")
+                .append(roundOne(targetCarbs * 0.98))
+                .append("g and ")
+                .append(targetCarbs)
+                .append("g, and never exceed the target.\n");
+        prompt.append("- Total protein across all four meals must be between ")
+                .append(roundOne(targetProtein * 0.98))
+                .append("g and ")
+                .append(targetProtein)
+                .append("g, and never exceed the target.\n");
+        prompt.append("- Total fat across all four meals must be between ")
+                .append(roundOne(targetFat * 0.98))
+                .append("g and ")
+                .append(targetFat)
+                .append("g, and never exceed the target.\n");
+        prompt.append("- Adjust ingredient gramsEstimated and measure to meet the targets.\n");
+        prompt.append("- After adjustment, recalculate ingredient energyKcal, proteinG, carbohydrateG, fatG.\n");
+        prompt.append("- Each meal totalEnergyKcal, totalProteinG, totalCarbohydrateG, totalFatG must equal the sum of its ingredients.\n");
+        prompt.append("- Do not return unrealistic portions or all-zero nutrition values.\n\n");
 
-        prompt.append("Daily macro target matching rules:\n");
-        prompt.append("1. targetCarbs = ").append(targetCarbs).append("g, targetProtein = ").append(targetProtein).append("g, targetFat = ").append(targetFat).append("g.\n");
-        prompt.append("2. The sum of totalCarbohydrateG from breakfast + lunch + dinner + snack should be between 98% and 100% of targetCarbs, and must never exceed targetCarbs.\n");
-        prompt.append("3. The sum of totalProteinG from breakfast + lunch + dinner + snack should be between 98% and 100% of targetProtein, and must never exceed targetProtein.\n");
-        prompt.append("4. The sum of totalFatG from breakfast + lunch + dinner + snack should be between 98% and 100% of targetFat, and must never exceed targetFat.\n");
-        prompt.append("5. Do not intentionally make the plan too low. A plan that is far below the targets is incorrect.\n");
-        prompt.append("6. If any macro is too low, increase suitable ingredient gramsEstimated and measure portions, then recalculate all ingredient and meal totals.\n");
-        prompt.append("7. If any macro is too high, reduce suitable ingredient gramsEstimated and measure portions, then recalculate all ingredient and meal totals.\n");
-        prompt.append("8. Use carb-rich foods like rice, oats, bread, potato, pasta, fruit to adjust carbs. Use chicken, fish, egg, tofu, beef, beans, yogurt to adjust protein. Use oil, egg yolk, avocado, nuts, milk, yogurt, fish to adjust fat.\n");
-        prompt.append("9. After every portion adjustment, update every ingredient's gramsEstimated, measure, energyKcal, proteinG, carbohydrateG, fatG.\n");
-        prompt.append("10. After every portion adjustment, update each meal's totalEnergyKcal, totalProteinG, totalCarbohydrateG, totalFatG so they equal the sum of its ingredients.\n");
-        prompt.append("11. Return realistic child-sized portions. Do not use very large portions like 1000g banana or 500g rice.\n");
-        prompt.append("12. Prefer changing portion weights of existing ingredients instead of adding unusual ingredients.\n\n");
+        prompt.append("Multilingual rules:\n");
+        prompt.append("- Each meal must include English, Simplified Chinese, and Malay display fields.\n");
+        prompt.append("- strMeal and strMealEn are English; strMealCn is Simplified Chinese; strMealMs is Malay.\n");
+        prompt.append("- Apply the same pattern to strCategory, strArea, and strInstructions.\n");
+        prompt.append("- All En, Cn, and Ms fields must be non-empty natural strings suitable for app UI display.\n\n");
 
-        prompt.append("Multilingual meal field requirements:\n");
-        prompt.append("1. Every meal must include English, Simplified Chinese, and Malay versions of the main display fields.\n");
-        prompt.append("2. strMeal should be English. strMealEn must equal the English name. strMealCn must be Simplified Chinese. strMealMs must be Malay.\n");
-        prompt.append("3. strCategory should be English. strCategoryEn must equal the English category. strCategoryCn must be Simplified Chinese. strCategoryMs must be Malay.\n");
-        prompt.append("4. strArea should be English. strAreaEn must equal the English area/cuisine. strAreaCn must be Simplified Chinese. strAreaMs must be Malay.\n");
-        prompt.append("5. strInstructions should be English. strInstructionsEn must equal the English cooking instructions. strInstructionsCn must be Simplified Chinese. strInstructionsMs must be Malay.\n");
-        prompt.append("6. Do not leave strMealCn, strMealMs, strCategoryCn, strCategoryMs, strAreaCn, strAreaMs, strInstructionsCn, or strInstructionsMs empty.\n");
-        prompt.append("7. Keep translated names natural and short for app UI display.\n\n");
+        prompt.append("Media and icon rules:\n");
+        prompt.append("- strMealThumb: return a real public HTTPS image URL only if confident it exists; otherwise return an empty string.\n");
+        prompt.append("- strYoutube must never be empty. Use a verified direct YouTube URL, or use this fallback search URL format:\n");
+        prompt.append("  https://www.youtube.com/results?search_query=RECIPE_NAME+tutorial\n");
+        prompt.append("- In the fallback search URL, RECIPE_NAME must use the exact strMeal value with spaces replaced by +.\n");
+        prompt.append("- Each meal must include mealIconEmoji, mealIconName, and mealIconPrompt.\n");
+        prompt.append("- mealIconEmoji must match the recipe; mealIconName should be a short English food keyword; mealIconPrompt should describe a cute flat app-style food icon on a white background.\n\n");
 
-        prompt.append("URL requirements:\n");
-        prompt.append("1. Do not invent fake URLs.\n");
-        prompt.append("2. Do not use example.com.\n");
-        prompt.append("3. Do not use placeholder URLs.\n");
-        prompt.append("4. Do not create fake themealdb image links.\n");
-        prompt.append("5. Do not create fake YouTube video IDs.\n");
-        prompt.append("6. For strMealThumb, only return a real public HTTPS image URL if you are confident it exists.\n");
-        prompt.append("7. If you are not confident the image URL exists, return an empty string for strMealThumb.\n");
-        prompt.append("8. For strYoutube, do not return a direct YouTube video URL unless you are confident the video exists and matches the recipe.\n");
-        prompt.append("9. If you are not confident about a direct YouTube video URL, return a YouTube search URL instead.\n");
-        prompt.append("10. YouTube search URL format must be:\n");
-        prompt.append("    https://www.youtube.com/results?search_query=RECIPE_NAME+tutorial\n");
-        prompt.append("11. Replace spaces in RECIPE_NAME with +.\n");
-        prompt.append("12. The YouTube search query must use the exact strMeal value plus the word tutorial.\n");
-        prompt.append("13. strYoutube must never be empty.\n");
-        prompt.append("14. If no direct video is known, use the YouTube search URL format.\n");
-        prompt.append("15. strMealThumb can be empty, but strYoutube must be a valid YouTube search URL or a verified direct YouTube video URL.\n\n");
-
-        prompt.append("Meal icon requirements:\n");
-        prompt.append("1. Every meal must include mealIconEmoji, mealIconName, and mealIconPrompt.\n");
-        prompt.append("2. mealIconEmoji must be a food emoji that matches the recipe.\n");
-        prompt.append("3. Use specific emojis when possible, for example: 🍚 rice, 🍛 curry or mixed rice, 🍜 noodles, 🍲 soup, 🥗 salad, 🥪 sandwich or toast, 🍗 chicken, 🐟 fish, 🥚 eggs, 🥣 yogurt/oats/porridge, 🍌 banana, 🍎 fruit, 🥘 stew, 🌮 wrap, 🍝 pasta, 🥞 pancakes.\n");
-        prompt.append("4. mealIconName should be a short English keyword like rice, rice-bowl, curry, noodle, soup, salad, sandwich, chicken, fish, egg, fruit, porridge, pasta.\n");
-        prompt.append("5. mealIconPrompt should describe a cute flat food icon matching the recipe, app illustration style, white background.\n");
-        prompt.append("6. If strMealThumb is empty, mealIconEmoji is required and should not be empty.\n\n");
-
-        prompt.append("Each meal must include:\n");
-        prompt.append("- idMeal\n");
-        prompt.append("- strMeal\n");
-        prompt.append("- strMealEn\n");
-        prompt.append("- strMealCn\n");
-        prompt.append("- strMealMs\n");
-        prompt.append("- strCategory\n");
-        prompt.append("- strCategoryEn\n");
-        prompt.append("- strCategoryCn\n");
-        prompt.append("- strCategoryMs\n");
-        prompt.append("- strArea\n");
-        prompt.append("- strAreaEn\n");
-        prompt.append("- strAreaCn\n");
-        prompt.append("- strAreaMs\n");
-        prompt.append("- strInstructions\n");
-        prompt.append("- strInstructionsEn\n");
-        prompt.append("- strInstructionsCn\n");
-        prompt.append("- strInstructionsMs\n");
-        prompt.append("- strMealThumb\n");
-        prompt.append("- mealIconEmoji\n");
-        prompt.append("- mealIconName\n");
-        prompt.append("- mealIconPrompt\n");
-        prompt.append("- strYoutube\n");
-        prompt.append("- totalEnergyKcal\n");
-        prompt.append("- totalProteinG\n");
-        prompt.append("- totalCarbohydrateG\n");
-        prompt.append("- totalFatG\n");
-        prompt.append("- ingredients\n\n");
-
-        prompt.append("Each ingredient must include:\n");
-        prompt.append("- ingredientName\n");
-        prompt.append("- measure\n");
-        prompt.append("- gramsEstimated\n");
-        prompt.append("- foodNameEn\n");
-        prompt.append("- foodNameCn\n");
-        prompt.append("- foodNameMs\n");
-        prompt.append("- foodGroup\n");
-        prompt.append("- energyKcal\n");
-        prompt.append("- proteinG\n");
-        prompt.append("- carbohydrateG\n");
-        prompt.append("- fatG\n\n");
-
-        prompt.append("Strict JSON rules:\n");
-        prompt.append("1. Return JSON only. Do not return markdown. Do not use ```json.\n");
-        prompt.append("2. The JSON must be strictly valid and parseable by Jackson ObjectMapper.\n");
-        prompt.append("3. Every object key must be wrapped in double quotes.\n");
-        prompt.append("4. Every string value must be wrapped in double quotes.\n");
-        prompt.append("5. Do not add comments.\n");
-        prompt.append("6. Do not add trailing commas.\n");
-        prompt.append("7. Do not return multiple JSON objects.\n");
-        prompt.append("8. Do not add extra text before or after the JSON object.\n");
-        prompt.append("9. Use realistic nutrition estimates. Do not make all values zero.\n");
-        prompt.append("10. For strMealThumb, return empty string if you cannot provide a real working image URL.\n");
-        prompt.append("11. For strYoutube, prefer a valid YouTube search URL using the exact recipe name.\n");
-        prompt.append("12. Example: if strMeal is \"Chicken Rice\", strYoutube should be \"https://www.youtube.com/results?search_query=Chicken+Rice+tutorial\".\n");
-        prompt.append("13. mealIconEmoji must be a valid emoji string and must not be empty.\n");
-        prompt.append("14. mealIconName and mealIconPrompt must not be empty.\n");
-        prompt.append("15. All multilingual fields ending with En, Cn, and Ms must be valid strings and must not be empty.\n");
-        prompt.append("16. Use Simplified Chinese for fields ending with Cn and Malay for fields ending with Ms.\n");
-        prompt.append("17. Daily totalCarbohydrateG should be between ").append(roundOne(targetCarbs * 0.98)).append(" and ").append(targetCarbs).append(".\n");
-        prompt.append("18. Daily totalProteinG should be between ").append(roundOne(targetProtein * 0.98)).append(" and ").append(targetProtein).append(".\n");
-        prompt.append("19. Daily totalFatG should be between ").append(roundOne(targetFat * 0.98)).append(" and ").append(targetFat).append(".\n");
-        prompt.append("20. If daily totals are below or above those ranges, you must adjust ingredient weights and recalculate the affected meal totals before returning JSON.\n\n");
-
-        prompt.append("Return exactly this JSON structure:\n");
+        prompt.append("Required JSON structure:\n");
         prompt.append("{\n");
         prompt.append("  \"plan\": {\n");
-        prompt.append("    \"breakfast\": {\n");
-        prompt.append("      \"idMeal\": \"ai-breakfast-1\",\n");
-        prompt.append("      \"strMeal\": \"Recipe name\",\n");
-        prompt.append("      \"strMealEn\": \"Recipe name\",\n");
-        prompt.append("      \"strMealCn\": \"食谱名称\",\n");
-        prompt.append("      \"strMealMs\": \"Nama resipi\",\n");
-        prompt.append("      \"strCategory\": \"Breakfast\",\n");
-        prompt.append("      \"strCategoryEn\": \"Breakfast\",\n");
-        prompt.append("      \"strCategoryCn\": \"早餐\",\n");
-        prompt.append("      \"strCategoryMs\": \"Sarapan\",\n");
-        prompt.append("      \"strArea\": \"Malaysian or International\",\n");
-        prompt.append("      \"strAreaEn\": \"Malaysian or International\",\n");
-        prompt.append("      \"strAreaCn\": \"马来西亚或国际风味\",\n");
-        prompt.append("      \"strAreaMs\": \"Malaysia atau Antarabangsa\",\n");
-        prompt.append("      \"strInstructions\": \"Cooking instructions\",\n");
-        prompt.append("      \"strInstructionsEn\": \"Cooking instructions\",\n");
-        prompt.append("      \"strInstructionsCn\": \"烹饪步骤\",\n");
-        prompt.append("      \"strInstructionsMs\": \"Arahan memasak\",\n");
-        prompt.append("      \"strMealThumb\": \"real image url or empty string\",\n");
-        prompt.append("      \"mealIconEmoji\": \"🍛\",\n");
-        prompt.append("      \"mealIconName\": \"rice-bowl\",\n");
-        prompt.append("      \"mealIconPrompt\": \"A cute flat food icon of this recipe, colorful, minimal, rounded, app illustration style, white background\",\n");
-        prompt.append("      \"strYoutube\": \"https://www.youtube.com/results?search_query=Recipe+name+tutorial\",\n");
-        prompt.append("      \"totalEnergyKcal\": 0,\n");
-        prompt.append("      \"totalProteinG\": 0,\n");
-        prompt.append("      \"totalCarbohydrateG\": 0,\n");
-        prompt.append("      \"totalFatG\": 0,\n");
-        prompt.append("      \"ingredients\": [\n");
-        prompt.append("        {\n");
-        prompt.append("          \"ingredientName\": \"Egg\",\n");
-        prompt.append("          \"measure\": \"2 large\",\n");
-        prompt.append("          \"gramsEstimated\": 100,\n");
-        prompt.append("          \"foodNameEn\": \"Egg\",\n");
-        prompt.append("          \"foodNameCn\": \"鸡蛋\",\n");
-        prompt.append("          \"foodNameMs\": \"Telur\",\n");
-        prompt.append("          \"foodGroup\": \"protein\",\n");
-        prompt.append("          \"energyKcal\": 140,\n");
-        prompt.append("          \"proteinG\": 12,\n");
-        prompt.append("          \"carbohydrateG\": 1,\n");
-        prompt.append("          \"fatG\": 10\n");
-        prompt.append("        }\n");
-        prompt.append("      ]\n");
-        prompt.append("    },\n");
-        prompt.append("    \"lunch\": {},\n");
-        prompt.append("    \"dinner\": {},\n");
-        prompt.append("    \"snack\": {}\n");
+        prompt.append("    \"breakfast\": { ...mealObject },\n");
+        prompt.append("    \"lunch\": { ...mealObject },\n");
+        prompt.append("    \"dinner\": { ...mealObject },\n");
+        prompt.append("    \"snack\": { ...mealObject }\n");
         prompt.append("  }\n");
-        prompt.append("}\n");
+        prompt.append("}\n\n");
+
+        prompt.append("Each mealObject must contain exactly these fields:\n");
+        prompt.append("idMeal, strMeal, strMealEn, strMealCn, strMealMs, ");
+        prompt.append("strCategory, strCategoryEn, strCategoryCn, strCategoryMs, ");
+        prompt.append("strArea, strAreaEn, strAreaCn, strAreaMs, ");
+        prompt.append("strInstructions, strInstructionsEn, strInstructionsCn, strInstructionsMs, ");
+        prompt.append("strMealThumb, mealIconEmoji, mealIconName, mealIconPrompt, strYoutube, ");
+        prompt.append("totalEnergyKcal, totalProteinG, totalCarbohydrateG, totalFatG, ingredients.\n\n");
+
+        prompt.append("Each ingredient object must contain exactly these fields:\n");
+        prompt.append("ingredientName, measure, gramsEstimated, foodNameEn, foodNameCn, foodNameMs, ");
+        prompt.append("foodGroup, energyKcal, proteinG, carbohydrateG, fatG.\n\n");
+
+        prompt.append("JSON validity rules:\n");
+        prompt.append("- Use double quotes for all keys and string values.\n");
+        prompt.append("- Do not use trailing commas.\n");
+        prompt.append("- Do not wrap the response in ```json.\n");
+        prompt.append("- Return one complete JSON object that can be parsed directly by Jackson ObjectMapper.\n");
 
         return prompt.toString();
     }
@@ -409,6 +474,63 @@ public class AiMealPlanService {
             } catch (Exception secondError) {
                 System.out.println("Second JSON parse failed: " + secondError.getMessage());
                 System.out.println("Invalid Gemini JSON text:");
+                System.out.println(text);
+
+                throw secondError;
+            }
+        }
+    }
+
+    private Map<String, Object> parseGroqResponse(String responseBody) throws Exception {
+        JsonNode root = objectMapper.readTree(responseBody);
+
+        String text = root
+                .path("choices")
+                .path(0)
+                .path("message")
+                .path("content")
+                .asText();
+
+        if (text == null || text.trim().length() == 0) {
+            throw new RuntimeException("Groq returned empty text");
+        }
+
+        text = cleanJsonText(text);
+
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> result = objectMapper.readValue(text, Map.class);
+
+            ensureMealLanguageFields(result);
+            ensureMealIconFields(result);
+            ensureYoutubeSearchLinks(result);
+            sanitizeMealPlanUrls(result);
+
+            return result;
+        } catch (Exception firstError) {
+            System.out.println("First Groq JSON parse failed: " + firstError.getMessage());
+
+            String extractedJson = extractFirstJsonObject(text);
+
+            if (extractedJson == null || extractedJson.trim().length() == 0) {
+                System.out.println("Invalid Groq JSON text:");
+                System.out.println(text);
+                throw firstError;
+            }
+
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> result = objectMapper.readValue(extractedJson, Map.class);
+
+                ensureMealLanguageFields(result);
+                ensureMealIconFields(result);
+                ensureYoutubeSearchLinks(result);
+                sanitizeMealPlanUrls(result);
+
+                return result;
+            } catch (Exception secondError) {
+                System.out.println("Second Groq JSON parse failed: " + secondError.getMessage());
+                System.out.println("Invalid Groq JSON text:");
                 System.out.println(text);
 
                 throw secondError;

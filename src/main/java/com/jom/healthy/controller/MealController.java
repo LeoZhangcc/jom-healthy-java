@@ -34,7 +34,7 @@ public class MealController {
     @ApiOperation("AI生成食谱计划")
     @PostMapping("/generatePlan")
     public ResponseData generateMealPlan(@RequestBody MealPlanGenerateRequest request) {
-        return ResponseData.success(aiMealPlanService.generateMealPlan(request));
+        return ResponseData.success(aiMealPlanService.generateMealPlanByGroq(request));
     }
 
 }
