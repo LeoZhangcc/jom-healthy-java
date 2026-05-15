@@ -15,7 +15,7 @@ app.all('/', (req, res) => {
   res.status(200).send('JomHealthy API is live and running!');
 });
 
-// Connect to your live Aiven database using the secure URL
+// Connect to live Aiven database using the secure URL
 const pool = mysql.createPool(process.env.DATABASE_URL);
 
 app.get('/api/drinks/search', async (req, res) => {
@@ -23,12 +23,15 @@ app.get('/api/drinks/search', async (req, res) => {
 
   try {
     // Search the original English description column
+    // Search across English, Mandarin, and Malay columns
     const [rows] = await pool.query(
-      `SELECT fdc_id, description, sugar_g_per_100g, calories_kcal_per_100g, carbohydrate_g_per_100g, protein_g_per_100g 
+      `SELECT fdc_id, description, description_zh, description_ms, sugar_g_per_100g, calories_kcal_per_100g, carbohydrate_g_per_100g, protein_g_per_100g 
        FROM beverages_nutrition 
        WHERE description LIKE ? 
+          OR description_zh LIKE ? 
+          OR description_ms LIKE ?
        LIMIT 10`, 
-      [`%${q}%`]
+      [`%${q}%`, `%${q}%`, `%${q}%`] // 3 variables for the 3 question marks
     );
 
     const formattedResults = rows.map(drink => {
@@ -47,9 +50,11 @@ app.get('/api/drinks/search', async (req, res) => {
         emoji: emoji,
         amountValue: 250, 
         type: isUnhealthy ? 'unhealthy' : 'healthy',
+        // Send all 3 languages to the app!
         title: drink.description, 
+        title_zh: drink.description_zh,
+        title_ms: drink.description_ms,
         sugar: drink.sugar_g_per_100g,
-        // 2. Add the new data to the final JSON response:
         energy: drink.calories_kcal_per_100g,
         carbs: drink.carbohydrate_g_per_100g,
         protein: drink.protein_g_per_100g
