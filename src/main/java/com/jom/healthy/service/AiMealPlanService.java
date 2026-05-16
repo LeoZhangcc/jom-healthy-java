@@ -38,7 +38,7 @@ public class AiMealPlanService {
     @Value("${GROQ_API_KEY:}")
     private String groqApiKey;
 
-    @Value("${GROQ_MODEL:openai/gpt-oss-20b}")
+    @Value("${GROQ_MODEL:groq/compound-mini}")
     private String groqModel;
 
     private final RestTemplate restTemplate = new RestTemplate();
@@ -245,7 +245,7 @@ public class AiMealPlanService {
             body.put("messages", messages);
             body.put("temperature", 0.5);
             body.put("max_completion_tokens", 6000);
-            body.put("reasoning_effort", "low");
+//            body.put("reasoning_effort", "low");
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -1062,10 +1062,12 @@ public class AiMealPlanService {
         double carbs = numberValue(ingredient.get("carbohydrateG"));
         double fat = numberValue(ingredient.get("fatG"));
 
-        double nextGrams = roundTwo(grams * factor);
+        int nextGrams = grams > 0.0
+                ? Math.max(1, (int) Math.round(grams * factor))
+                : 0;
 
+        // Only gramsEstimated is adjusted. Keep the original TheMealDB measure text unchanged.
         ingredient.put("gramsEstimated", nextGrams);
-        ingredient.put("measure", formatScaledGramMeasure(nextGrams));
         ingredient.put("energyKcal", roundFour(energy * factor));
         ingredient.put("proteinG", roundFour(protein * factor));
         ingredient.put("carbohydrateG", roundFour(carbs * factor));
@@ -2754,15 +2756,15 @@ public class AiMealPlanService {
     }
 
     private void applyCandidateDelta(MacroIngredientCandidate candidate, double deltaGrams) {
-        double nextGrams = candidate.currentGrams + deltaGrams;
-        nextGrams = Math.max(1.0, Math.min(nextGrams, candidate.maximumGrams()));
-        nextGrams = roundOne(nextGrams);
+        double rawNextGrams = candidate.currentGrams + deltaGrams;
+        rawNextGrams = Math.max(1.0, Math.min(rawNextGrams, candidate.maximumGrams()));
+        int nextGrams = Math.max(1, (int) Math.round(rawNextGrams));
 
         candidate.currentGrams = nextGrams;
 
         Map<String, Object> ingredient = candidate.ingredient;
+        // Only gramsEstimated is adjusted. Keep the original TheMealDB measure text unchanged.
         ingredient.put("gramsEstimated", nextGrams);
-        ingredient.put("measure", formatGramMeasure(nextGrams));
         ingredient.put("energyKcal", roundOne(candidate.kcalPerGram * nextGrams));
         ingredient.put("proteinG", roundOne(candidate.proteinPerGram * nextGrams));
         ingredient.put("carbohydrateG", roundOne(candidate.carbsPerGram * nextGrams));
@@ -2914,8 +2916,8 @@ public class AiMealPlanService {
         int nextGrams = originalGrams > 0 ? Math.max(1, (int) Math.round(originalGrams * scale)) : 0;
 
         if (nextGrams > 0) {
+            // Only gramsEstimated is adjusted. Keep the original TheMealDB measure text unchanged.
             ingredient.put("gramsEstimated", nextGrams);
-            ingredient.put("measure", nextGrams + "g");
         }
 
         ingredient.put("energyKcal", roundOne(numberValue(ingredient.get("energyKcal")) * scale));
