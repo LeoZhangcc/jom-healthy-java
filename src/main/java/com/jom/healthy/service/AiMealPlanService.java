@@ -428,6 +428,9 @@ public class AiMealPlanService {
         prompt.append("Task: choose meals for ").append(requestedDays).append(" day(s). ");
         prompt.append("Each day must contain breakfast, lunch, dinner, and snack. ");
         prompt.append("Prefer variety across days and avoid repeating the same meal too often. ");
+        prompt.append("Meal-size guidance: lunch and dinner should be the two nutritionally larger meals and should be reasonably balanced with each other; ");
+        prompt.append("breakfast should be moderate, smaller than lunch and dinner, but clearly larger than snack; ");
+        prompt.append("snack should be light. ");
         prompt.append("Use the meal's category as a clue, but select only from the candidate list.\n");
 
         prompt.append("Candidate meals: ").append(candidateBuilder).append("\n");
@@ -652,6 +655,12 @@ public class AiMealPlanService {
 
         String[] mealKeys = new String[] {"breakfast", "lunch", "dinner", "snack"};
         double[] before = recalculatePlanAndGetTotals(plan, mealKeys);
+        logMealNutritionDistribution(
+                "AI DB meal plan day " + dayNumber + " selected meals BEFORE scaling",
+                plan,
+                mealKeys,
+                new double[] {targetCarbs, targetProtein, targetFat}
+        );
 
         /*
          * matrix[macroRow][groupColumn]
@@ -663,69 +672,154 @@ public class AiMealPlanService {
         double[] targets = new double[] {targetCarbs, targetProtein, targetFat};
         double[] factors = solveThreeByThree(groupMacroMatrix, targets);
 
-        if (!isUsableMacroGroupFactorSolution(groupMacroMatrix, factors, targets)) {
-            log.warn(
-                    "AI DB meal plan day {} cannot find a positive exact macro-group scaling solution on first attempt. " +
-                            "Before:{}/{}/{} Target:{}/{}/{}. GroupMatrix carbs=[{},{},{}], protein=[{},{},{}], fat=[{},{},{}]. " +
-                            "Trying same-category meal replacements.",
-                    dayNumber,
-                    roundOne(before[0]),
-                    roundOne(before[1]),
-                    roundOne(before[2]),
-                    targetCarbs,
-                    targetProtein,
-                    targetFat,
-                    roundFour(groupMacroMatrix[0][0]),
-                    roundFour(groupMacroMatrix[0][1]),
-                    roundFour(groupMacroMatrix[0][2]),
-                    roundFour(groupMacroMatrix[1][0]),
-                    roundFour(groupMacroMatrix[1][1]),
-                    roundFour(groupMacroMatrix[1][2]),
-                    roundFour(groupMacroMatrix[2][0]),
-                    roundFour(groupMacroMatrix[2][1]),
-                    roundFour(groupMacroMatrix[2][2])
-            );
+        boolean exactMacroSolutionFound =
+                isUsableMacroGroupFactorSolution(groupMacroMatrix, factors, targets);
 
+        double[] currentMealShares = exactMacroSolutionFound
+                ? calculateProjectedMealNutritionShares(plan, mealKeys, factors, targets)
+                : null;
+
+        boolean mealDistributionBalanced =
+                exactMacroSolutionFound
+                        && isMealDistributionBalanced(currentMealShares);
+
+        if (!exactMacroSolutionFound || !mealDistributionBalanced) {
+            if (!exactMacroSolutionFound) {
+                log.warn(
+                        "AI DB meal plan day {} cannot find a positive exact macro-group scaling solution on first attempt. " +
+                                "Before:{}/{}/{} Target:{}/{}/{}. GroupMatrix carbs=[{},{},{}], protein=[{},{},{}], fat=[{},{},{}]. " +
+                                "Trying same-category meal replacements with lunch/dinner balance preference.",
+                        dayNumber,
+                        roundOne(before[0]),
+                        roundOne(before[1]),
+                        roundOne(before[2]),
+                        targetCarbs,
+                        targetProtein,
+                        targetFat,
+                        roundFour(groupMacroMatrix[0][0]),
+                        roundFour(groupMacroMatrix[0][1]),
+                        roundFour(groupMacroMatrix[0][2]),
+                        roundFour(groupMacroMatrix[1][0]),
+                        roundFour(groupMacroMatrix[1][1]),
+                        roundFour(groupMacroMatrix[1][2]),
+                        roundFour(groupMacroMatrix[2][0]),
+                        roundFour(groupMacroMatrix[2][1]),
+                        roundFour(groupMacroMatrix[2][2])
+                );
+            } else {
+                log.info(
+                        "AI DB meal plan day {} has exact daily macros but meal distribution is not ideal. " +
+                                "Projected breakfast/lunch/dinner/snack shares={}/{}/{}/{}. " +
+                                "Trying same-category replacements for a better daily distribution.",
+                        dayNumber,
+                        roundFour(currentMealShares[0]),
+                        roundFour(currentMealShares[1]),
+                        roundFour(currentMealShares[2]),
+                        roundFour(currentMealShares[3])
+                );
+            }
+
+            /*
+             * First preference:
+             * - exact daily macros
+             * - balanced meal distribution:
+             *   lunch and dinner larger and close to each other,
+             *   breakfast moderate and > snack,
+             *   snack light.
+             */
             MacroGroupReplacementSolution replacementSolution =
                     findSameCategoryReplacementSolution(
                             plan,
                             mealKeys,
                             request,
                             targets,
-                            dayNumber
+                            dayNumber,
+                            true
                     );
 
-            if (replacementSolution == null) {
+            /*
+             * If the original plan has no exact macro solution at all,
+             * allow a second pass that only requires exact macros.
+             * This prevents returning an unadjusted plan when a nutritionally exact
+             * same-category replacement exists but the ideal meal distribution is impossible.
+             */
+            if (replacementSolution == null && !exactMacroSolutionFound) {
+                replacementSolution =
+                        findSameCategoryReplacementSolution(
+                                plan,
+                                mealKeys,
+                                request,
+                                targets,
+                                dayNumber,
+                                false
+                        );
+            }
+
+            if (replacementSolution != null) {
+                replacePlanMealsWithSolution(plan, mealKeys, replacementSolution);
+                groupMacroMatrix = collectMacroGroupMatrix(plan, mealKeys);
+                factors = replacementSolution.factors;
+
+                log.info(
+                        "AI DB meal plan day {} found same-category replacement solution. " +
+                                "Replacements:{}, BalancedDistribution:{}, Shares breakfast/lunch/dinner/snack={}/{}/{}/{}, " +
+                                "Factors carb/protein/fat={}/{}/{}.",
+                        dayNumber,
+                        replacementSolution.replacementCount,
+                        replacementSolution.balancedDistribution,
+                        roundFour(replacementSolution.mealShares[0]),
+                        roundFour(replacementSolution.mealShares[1]),
+                        roundFour(replacementSolution.mealShares[2]),
+                        roundFour(replacementSolution.mealShares[3]),
+                        roundFour(factors[0]),
+                        roundFour(factors[1]),
+                        roundFour(factors[2])
+                );
+            } else if (!exactMacroSolutionFound) {
                 log.warn(
                         "AI DB meal plan day {} still cannot find an exact macro-group solution after same-category replacements. " +
                                 "Keeping the original selected meals unchanged.",
                         dayNumber
                 );
                 return;
+            } else {
+                log.warn(
+                        "AI DB meal plan day {} keeps the exact-macro original meals because no same-category replacement " +
+                                "could improve the lunch/dinner-heavy, breakfast-moderate, snack-light distribution.",
+                        dayNumber
+                );
             }
-
-            replacePlanMealsWithSolution(plan, mealKeys, replacementSolution);
-            groupMacroMatrix = collectMacroGroupMatrix(plan, mealKeys);
-            factors = replacementSolution.factors;
-
-            log.info(
-                    "AI DB meal plan day {} found same-category replacement solution. " +
-                            "Replacements:{}, Factors carb/protein/fat={}/{}/{}.",
-                    dayNumber,
-                    replacementSolution.replacementCount,
-                    roundFour(factors[0]),
-                    roundFour(factors[1]),
-                    roundFour(factors[2])
-            );
         }
+
+        logMealNutritionDistribution(
+                "AI DB meal plan day " + dayNumber + " meals BEFORE macro-group scaling",
+                plan,
+                mealKeys,
+                new double[] {targetCarbs, targetProtein, targetFat}
+        );
 
         scaleIngredientsByMacroGroups(plan, mealKeys, factors);
 
         double[] after = recalculatePlanAndGetTotals(plan, mealKeys);
+        double[] finalMealShares =
+                calculateProjectedMealNutritionShares(
+                        plan,
+                        mealKeys,
+                        new double[] {1.0, 1.0, 1.0},
+                        targets
+                );
+
+        logMealNutritionDistribution(
+                "AI DB meal plan day " + dayNumber + " FINAL meals AFTER macro-group scaling",
+                plan,
+                mealKeys,
+                targets
+        );
 
         log.info(
                 "AI DB meal plan day {} macro-group factors carb/protein/fat={}/{}/{}. " +
-                        "Before:{}/{}/{} Target:{}/{}/{} After:{}/{}/{} Error:{}/{}/{}",
+                        "Before:{}/{}/{} Target:{}/{}/{} After:{}/{}/{} Error:{}/{}/{}. " +
+                        "Final shares breakfast/lunch/dinner/snack={}/{}/{}/{}, BalancedDistribution:{}",
                 dayNumber,
                 roundFour(factors[0]),
                 roundFour(factors[1]),
@@ -741,7 +835,12 @@ public class AiMealPlanService {
                 roundOne(after[2]),
                 roundFour(after[0] - targetCarbs),
                 roundFour(after[1] - targetProtein),
-                roundFour(after[2] - targetFat)
+                roundFour(after[2] - targetFat),
+                roundFour(finalMealShares[0]),
+                roundFour(finalMealShares[1]),
+                roundFour(finalMealShares[2]),
+                roundFour(finalMealShares[3]),
+                isMealDistributionBalanced(finalMealShares)
         );
     }
 
@@ -985,7 +1084,8 @@ public class AiMealPlanService {
             String[] mealKeys,
             MealPlanGenerateRequest request,
             double[] targets,
-            int dayNumber
+            int dayNumber,
+            boolean requireBalancedDistribution
     ) {
         if (originalPlan == null || mealKeys == null || mealKeys.length != 4) {
             return null;
@@ -1052,15 +1152,18 @@ public class AiMealPlanService {
                 0,
                 selected,
                 0,
-                bestHolder
+                bestHolder,
+                requireBalancedDistribution
         );
 
         MacroGroupReplacementSolution best = bestHolder[0];
 
         if (best == null) {
             log.warn(
-                    "AI DB meal plan day {} replacement search did not find a valid same-category combination. Options per slot={}/{}/{}/{}.",
+                    "AI DB meal plan day {} replacement search did not find a valid same-category combination. " +
+                            "RequireBalancedDistribution:{}, Options per slot={}/{}/{}/{}.",
                     dayNumber,
+                    requireBalancedDistribution,
                     slotOptions.get(0).size(),
                     slotOptions.get(1).size(),
                     slotOptions.get(2).size(),
@@ -1078,7 +1181,8 @@ public class AiMealPlanService {
             int depth,
             List<Map<String, Object>> selected,
             int replacementCount,
-            MacroGroupReplacementSolution[] bestHolder
+            MacroGroupReplacementSolution[] bestHolder,
+            boolean requireBalancedDistribution
     ) {
         if (slotOptions == null || mealKeys == null || targets == null) {
             return;
@@ -1098,14 +1202,29 @@ public class AiMealPlanService {
                 return;
             }
 
-            double score = replacementCount * 1000.0 + macroGroupFactorDistanceFromOne(factors);
+            double[] mealShares =
+                    calculateProjectedMealNutritionShares(candidatePlan, mealKeys, factors, targets);
+
+            boolean balancedDistribution = isMealDistributionBalanced(mealShares);
+
+            if (requireBalancedDistribution && !balancedDistribution) {
+                return;
+            }
+
+            double distributionPenalty = mealDistributionPenalty(mealShares);
+            double score =
+                    replacementCount * 1000.0
+                            + distributionPenalty * 100.0
+                            + macroGroupFactorDistanceFromOne(factors);
 
             if (bestHolder[0] == null || score < bestHolder[0].score) {
                 bestHolder[0] = new MacroGroupReplacementSolution(
                         cloneMealSelection(selected),
                         factors,
                         replacementCount,
-                        score
+                        score,
+                        mealShares,
+                        balancedDistribution
                 );
             }
 
@@ -1137,7 +1256,8 @@ public class AiMealPlanService {
                     depth + 1,
                     selected,
                     nextReplacementCount,
-                    bestHolder
+                    bestHolder,
+                    requireBalancedDistribution
             );
 
             selected.remove(selected.size() - 1);
@@ -1227,18 +1347,310 @@ public class AiMealPlanService {
         private final double[] factors;
         private final int replacementCount;
         private final double score;
+        private final double[] mealShares;
+        private final boolean balancedDistribution;
 
         private MacroGroupReplacementSolution(
                 List<Map<String, Object>> meals,
                 double[] factors,
                 int replacementCount,
-                double score
+                double score,
+                double[] mealShares,
+                boolean balancedDistribution
         ) {
             this.meals = meals;
             this.factors = factors;
             this.replacementCount = replacementCount;
             this.score = score;
+            this.mealShares = mealShares;
+            this.balancedDistribution = balancedDistribution;
         }
+    }
+
+    /**
+     * 打印 4 餐的营养分布，方便检查：
+     * - 每餐食谱名称
+     * - 每餐 kcal / carbs / protein / fat
+     * - 每餐在全天目标中的平均营养占比 share
+     */
+    @SuppressWarnings("unchecked")
+    private void logMealNutritionDistribution(
+            String title,
+            Map<String, Object> plan,
+            String[] mealKeys,
+            double[] targets
+    ) {
+        if (plan == null || mealKeys == null || targets == null || targets.length < 3) {
+            return;
+        }
+
+        double safeTargetCarbs = Math.max(targets[0], 1.0);
+        double safeTargetProtein = Math.max(targets[1], 1.0);
+        double safeTargetFat = Math.max(targets[2], 1.0);
+
+        StringBuilder builder = new StringBuilder();
+        builder.append(title).append(" ===== ");
+
+        double totalKcal = 0.0;
+        double totalCarbs = 0.0;
+        double totalProtein = 0.0;
+        double totalFat = 0.0;
+
+        for (int i = 0; i < mealKeys.length; i++) {
+            String mealKey = mealKeys[i];
+            Object mealObj = plan.get(mealKey);
+
+            if (!(mealObj instanceof Map)) {
+                builder.append(mealKey).append("={missing}");
+                if (i < mealKeys.length - 1) {
+                    builder.append(" | ");
+                }
+                continue;
+            }
+
+            Map<String, Object> meal = (Map<String, Object>) mealObj;
+            recalculateMealTotalsFromIngredients(meal);
+
+            String mealName = stringValue(meal.get("strMeal"), "Unknown Meal");
+            double kcal = numberValue(meal.get("totalEnergyKcal"));
+            double carbs = numberValue(meal.get("totalCarbohydrateG"));
+            double protein = numberValue(meal.get("totalProteinG"));
+            double fat = numberValue(meal.get("totalFatG"));
+
+            double share = (
+                    carbs / safeTargetCarbs
+                            + protein / safeTargetProtein
+                            + fat / safeTargetFat
+            ) / 3.0;
+
+            totalKcal += kcal;
+            totalCarbs += carbs;
+            totalProtein += protein;
+            totalFat += fat;
+
+            builder.append(mealKey)
+                    .append("={meal:")
+                    .append(mealName)
+                    .append(", kcal:")
+                    .append(roundOne(kcal))
+                    .append(", C:")
+                    .append(roundOne(carbs))
+                    .append(", P:")
+                    .append(roundOne(protein))
+                    .append(", F:")
+                    .append(roundOne(fat))
+                    .append(", share:")
+                    .append(roundFour(share))
+                    .append("}");
+
+            if (i < mealKeys.length - 1) {
+                builder.append(" | ");
+            }
+        }
+
+        builder.append(" || total={kcal:")
+                .append(roundOne(totalKcal))
+                .append(", C:")
+                .append(roundOne(totalCarbs))
+                .append(", P:")
+                .append(roundOne(totalProtein))
+                .append(", F:")
+                .append(roundOne(totalFat))
+                .append("}");
+
+        log.info(builder.toString());
+    }
+
+
+    /**
+     * 计算在 carb/protein/fat 三组缩放因子应用之后，每个餐次在全天营养中的占比。
+     *
+     * 占比不是单纯用热量，而是取该餐：
+     * - 碳水占全天目标的比例
+     * - 蛋白质占全天目标的比例
+     * - 脂肪占全天目标的比例
+     * 三者的平均值。
+     *
+     * 因为每日总 carbs/protein/fat 已被精确求解到目标，所以 4 餐 share 之和约等于 1。
+     */
+    @SuppressWarnings("unchecked")
+    private double[] calculateProjectedMealNutritionShares(
+            Map<String, Object> plan,
+            String[] mealKeys,
+            double[] factors,
+            double[] targets
+    ) {
+        double[] shares = new double[] {0.0, 0.0, 0.0, 0.0};
+
+        if (plan == null
+                || mealKeys == null
+                || mealKeys.length != 4
+                || factors == null
+                || factors.length != 3
+                || targets == null
+                || targets.length != 3) {
+            return shares;
+        }
+
+        double safeTargetCarbs = Math.max(targets[0], 1.0);
+        double safeTargetProtein = Math.max(targets[1], 1.0);
+        double safeTargetFat = Math.max(targets[2], 1.0);
+
+        for (int mealIndex = 0; mealIndex < mealKeys.length; mealIndex++) {
+            Object mealObj = plan.get(mealKeys[mealIndex]);
+
+            if (!(mealObj instanceof Map)) {
+                continue;
+            }
+
+            Map<String, Object> meal = (Map<String, Object>) mealObj;
+            Object ingredientsObj = meal.get("ingredients");
+
+            if (!(ingredientsObj instanceof List)) {
+                continue;
+            }
+
+            double projectedCarbs = 0.0;
+            double projectedProtein = 0.0;
+            double projectedFat = 0.0;
+
+            List<Object> ingredients = (List<Object>) ingredientsObj;
+
+            for (Object ingredientObj : ingredients) {
+                if (!(ingredientObj instanceof Map)) {
+                    continue;
+                }
+
+                Map<String, Object> ingredient = (Map<String, Object>) ingredientObj;
+
+                double carbs = numberValue(ingredient.get("carbohydrateG"));
+                double protein = numberValue(ingredient.get("proteinG"));
+                double fat = numberValue(ingredient.get("fatG"));
+
+                if (carbs <= 0.0 && protein <= 0.0 && fat <= 0.0) {
+                    continue;
+                }
+
+                int group = classifyIngredientMacroGroup(ingredient, carbs, protein, fat);
+                double factor = factors[group];
+
+                projectedCarbs += carbs * factor;
+                projectedProtein += protein * factor;
+                projectedFat += fat * factor;
+            }
+
+            shares[mealIndex] =
+                    (
+                            projectedCarbs / safeTargetCarbs
+                                    + projectedProtein / safeTargetProtein
+                                    + projectedFat / safeTargetFat
+                    ) / 3.0;
+        }
+
+        return shares;
+    }
+
+    /**
+     * 目标分配：
+     * breakfast ≈ 22%
+     * lunch     ≈ 33%
+     * dinner    ≈ 33%
+     * snack     ≈ 12%
+     *
+     * 允许一定弹性，但必须体现：
+     * - lunch / dinner 是较多的两餐
+     * - lunch 与 dinner 不应差距过大
+     * - breakfast > snack
+     * - snack 是最轻的一餐
+     */
+    private boolean isMealDistributionBalanced(double[] shares) {
+        if (shares == null || shares.length < 4) {
+            return false;
+        }
+
+        double breakfast = shares[0];
+        double lunch = shares[1];
+        double dinner = shares[2];
+        double snack = shares[3];
+
+        boolean lunchAndDinnerLarger =
+                lunch >= 0.26
+                        && dinner >= 0.26
+                        && lunch > breakfast
+                        && dinner > breakfast
+                        && lunch > snack
+                        && dinner > snack;
+
+        boolean lunchDinnerReasonablyBalanced =
+                Math.abs(lunch - dinner) <= 0.12;
+
+        boolean breakfastModerate =
+                breakfast >= 0.14
+                        && breakfast <= 0.30
+                        && breakfast > snack;
+
+        boolean snackLight =
+                snack >= 0.03
+                        && snack <= 0.18;
+
+        return lunchAndDinnerLarger
+                && lunchDinnerReasonablyBalanced
+                && breakfastModerate
+                && snackLight;
+    }
+
+    private double mealDistributionPenalty(double[] shares) {
+        if (shares == null || shares.length < 4) {
+            return Double.MAX_VALUE / 4.0;
+        }
+
+        double breakfast = shares[0];
+        double lunch = shares[1];
+        double dinner = shares[2];
+        double snack = shares[3];
+
+        double[] desired = new double[] {0.22, 0.33, 0.33, 0.12};
+
+        double penalty =
+                square(breakfast - desired[0])
+                        + square(lunch - desired[1])
+                        + square(dinner - desired[2])
+                        + square(snack - desired[3]);
+
+        // Hard-direction penalties so the ranking strongly prefers the wanted shape.
+        if (lunch <= breakfast) {
+            penalty += square((breakfast - lunch) + 0.08) * 20.0;
+        }
+
+        if (dinner <= breakfast) {
+            penalty += square((breakfast - dinner) + 0.08) * 20.0;
+        }
+
+        if (breakfast <= snack) {
+            penalty += square((snack - breakfast) + 0.06) * 20.0;
+        }
+
+        if (snack > 0.18) {
+            penalty += square(snack - 0.18) * 20.0;
+        }
+
+        if (lunch < 0.26) {
+            penalty += square(0.26 - lunch) * 20.0;
+        }
+
+        if (dinner < 0.26) {
+            penalty += square(0.26 - dinner) * 20.0;
+        }
+
+        if (Math.abs(lunch - dinner) > 0.12) {
+            penalty += square(Math.abs(lunch - dinner) - 0.12) * 20.0;
+        }
+
+        return penalty;
+    }
+
+    private double square(double value) {
+        return value * value;
     }
 
     private double[] solveThreeByThree(double[][] matrix, double[] vector) {
