@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jom.healthy.dto.MealIngredientNutritionDto;
 import com.jom.healthy.dto.MealNutritionDto;
+import com.jom.healthy.dto.MealPlanGenerateRequest;
 import com.jom.healthy.dto.MealNutritionRowDto;
 import com.jom.healthy.entity.TheMealDbMeal;
 import com.jom.healthy.entity.TheMealDbMealIngredient;
@@ -29,9 +30,13 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -340,6 +345,365 @@ public class TheMealServiceImpl extends ServiceImpl<TheMealDbMealMapper, TheMeal
         matcher.appendTail(result);
 
         return result.toString();
+    }
+
+    @Override
+    public List<TheMealDbMeal> selectRandomMealCandidatesForAi(MealPlanGenerateRequest request, int limit) {
+        int safeLimit = Math.max(1, Math.min(limit <= 0 ? 30 : limit, 60));
+        int poolLimit = Math.max(safeLimit * 10, 240);
+
+        Set<String> excludedCategories = buildExcludedMealCategories(request);
+
+        LambdaQueryWrapper<TheMealDbMeal> wrapper = new LambdaQueryWrapper<TheMealDbMeal>()
+                .isNotNull(TheMealDbMeal::getStrMeal)
+                .ne(TheMealDbMeal::getStrMeal, "");
+
+        if (!excludedCategories.isEmpty()) {
+            wrapper.notIn(TheMealDbMeal::getStrCategory, excludedCategories);
+        }
+
+        wrapper.last("ORDER BY RAND() LIMIT " + poolLimit);
+
+        List<TheMealDbMeal> randomPool = this.list(wrapper);
+        List<TheMealDbMeal> filtered = new ArrayList<TheMealDbMeal>();
+
+        for (TheMealDbMeal meal : randomPool) {
+            if (meal == null || meal.getStrMeal() == null || meal.getStrMeal().trim().length() == 0) {
+                continue;
+            }
+
+            if (shouldExcludeMealByRequest(meal, request)) {
+                continue;
+            }
+
+            filtered.add(meal);
+        }
+
+        if (filtered.isEmpty()) {
+            return filtered;
+        }
+
+        // 尽量从不同 category 轮流抽取，避免 30 个候选都来自同一类。
+        Map<String, List<TheMealDbMeal>> groupedByCategory = new LinkedHashMap<String, List<TheMealDbMeal>>();
+        for (TheMealDbMeal meal : filtered) {
+            String category = meal.getStrCategory() == null || meal.getStrCategory().trim().length() == 0
+                    ? "Unknown"
+                    : meal.getStrCategory().trim();
+
+            List<TheMealDbMeal> group = groupedByCategory.get(category);
+            if (group == null) {
+                group = new ArrayList<TheMealDbMeal>();
+                groupedByCategory.put(category, group);
+            }
+            group.add(meal);
+        }
+
+        List<TheMealDbMeal> selected = new ArrayList<TheMealDbMeal>();
+        Set<String> selectedMealNames = new LinkedHashSet<String>();
+
+        boolean added = true;
+        while (selected.size() < safeLimit && added) {
+            added = false;
+
+            for (List<TheMealDbMeal> group : groupedByCategory.values()) {
+                if (selected.size() >= safeLimit) {
+                    break;
+                }
+
+                while (!group.isEmpty()) {
+                    TheMealDbMeal candidate = group.remove(0);
+                    String key = candidate.getStrMeal().trim().toLowerCase();
+
+                    if (selectedMealNames.add(key)) {
+                        selected.add(candidate);
+                        added = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (selected.size() < safeLimit) {
+            for (TheMealDbMeal candidate : filtered) {
+                if (selected.size() >= safeLimit) {
+                    break;
+                }
+
+                String key = candidate.getStrMeal().trim().toLowerCase();
+                if (selectedMealNames.add(key)) {
+                    selected.add(candidate);
+                }
+            }
+        }
+
+        return selected;
+    }
+
+    @Override
+    public MealNutritionDto findMealNutritionByExactStrMeal(String strMeal) {
+        if (strMeal == null || strMeal.trim().length() == 0) {
+            return null;
+        }
+
+        String target = strMeal.trim();
+        List<MealNutritionDto> meals = searchMealsByNamePrefix(target);
+
+        MealNutritionDto firstUsable = null;
+
+        for (MealNutritionDto meal : meals) {
+            if (meal == null || meal.getStrMeal() == null) {
+                continue;
+            }
+
+            if (firstUsable == null) {
+                firstUsable = meal;
+            }
+
+            if (target.equalsIgnoreCase(meal.getStrMeal().trim())) {
+                return meal;
+            }
+        }
+
+        return firstUsable;
+    }
+
+    @Override
+    public List<MealNutritionDto> findSameCategoryAlternativeMealsForAi(
+            String category,
+            MealPlanGenerateRequest request,
+            List<String> excludedMealNames,
+            int limit
+    ) {
+        int safeLimit = Math.max(1, Math.min(limit <= 0 ? 6 : limit, 12));
+        int poolLimit = Math.max(safeLimit * 8, 60);
+
+        Set<String> excludedNameSet = new HashSet<String>();
+        if (excludedMealNames != null) {
+            for (String name : excludedMealNames) {
+                if (name != null && name.trim().length() > 0) {
+                    excludedNameSet.add(name.trim().toLowerCase());
+                }
+            }
+        }
+
+        LambdaQueryWrapper<TheMealDbMeal> wrapper = new LambdaQueryWrapper<TheMealDbMeal>()
+                .isNotNull(TheMealDbMeal::getStrMeal)
+                .ne(TheMealDbMeal::getStrMeal, "");
+
+        if (category != null && category.trim().length() > 0) {
+            wrapper.eq(TheMealDbMeal::getStrCategory, category.trim());
+        }
+
+        Set<String> excludedCategories = buildExcludedMealCategories(request);
+        if (!excludedCategories.isEmpty()) {
+            wrapper.notIn(TheMealDbMeal::getStrCategory, excludedCategories);
+        }
+
+        wrapper.last("ORDER BY RAND() LIMIT " + poolLimit);
+
+        List<TheMealDbMeal> pool = this.list(wrapper);
+        List<MealNutritionDto> result = new ArrayList<MealNutritionDto>();
+
+        for (TheMealDbMeal meal : pool) {
+            if (result.size() >= safeLimit) {
+                break;
+            }
+
+            if (meal == null || meal.getStrMeal() == null || meal.getStrMeal().trim().length() == 0) {
+                continue;
+            }
+
+            String mealNameKey = meal.getStrMeal().trim().toLowerCase();
+            if (excludedNameSet.contains(mealNameKey)) {
+                continue;
+            }
+
+            if (shouldExcludeMealByRequest(meal, request)) {
+                continue;
+            }
+
+            MealNutritionDto dto = findMealNutritionByExactStrMeal(meal.getStrMeal());
+            if (dto == null || dto.getIngredients() == null || dto.getIngredients().isEmpty()) {
+                continue;
+            }
+
+            result.add(dto);
+            excludedNameSet.add(mealNameKey);
+        }
+
+        return result;
+    }
+
+    private Set<String> buildExcludedMealCategories(MealPlanGenerateRequest request) {
+        Set<String> categories = new HashSet<String>();
+
+        if (hasRestriction(request, "vegetarian")) {
+            Collections.addAll(categories, "Beef", "Chicken", "Lamb", "Pork", "Seafood", "Goat");
+        }
+
+        if (hasRestriction(request, "halal")) {
+            categories.add("Pork");
+        }
+
+        if (hasRestriction(request, "noSeafood") || hasAllergy(request, "Shellfish")) {
+            categories.add("Seafood");
+        }
+
+        return categories;
+    }
+
+    private boolean shouldExcludeMealByRequest(TheMealDbMeal meal, MealPlanGenerateRequest request) {
+        String searchable = buildMealSearchableText(meal);
+
+        if (hasRestriction(request, "vegetarian")
+                && containsAnyIgnoreCase(searchable,
+                "beef", "chicken", "pork", "lamb", "goat", "turkey",
+                "fish", "salmon", "tuna", "seafood", "shrimp", "prawn",
+                "crab", "lobster", "anchovy", "bacon", "ham")) {
+            return true;
+        }
+
+        if (hasRestriction(request, "halal")
+                && containsAnyIgnoreCase(searchable,
+                "pork", "bacon", "ham", "lard", "wine", "rum", "brandy",
+                "beer", "whisky", "whiskey", "alcohol")) {
+            return true;
+        }
+
+        if ((hasRestriction(request, "noSeafood") || hasAllergy(request, "Shellfish"))
+                && containsAnyIgnoreCase(searchable,
+                "seafood", "shrimp", "prawn", "crab", "lobster", "mussel",
+                "clam", "oyster", "scallop", "fish", "salmon", "tuna",
+                "anchovy", "sardine")) {
+            return true;
+        }
+
+        if ((hasRestriction(request, "lactoseIntolerance") || hasAllergy(request, "Dairy"))
+                && containsAnyIgnoreCase(searchable,
+                "milk", "cheese", "butter", "cream", "yogurt", "yoghurt",
+                "parmesan", "mozzarella", "cheddar", "ricotta")) {
+            return true;
+        }
+
+        if (hasAllergy(request, "Eggs")
+                && containsAnyIgnoreCase(searchable, "egg", "eggs", "mayonnaise", "mayo")) {
+            return true;
+        }
+
+        if (hasAllergy(request, "Peanuts")
+                && containsAnyIgnoreCase(searchable, "peanut", "peanuts", "groundnut")) {
+            return true;
+        }
+
+        if (hasAllergy(request, "Tree nuts")
+                && containsAnyIgnoreCase(searchable,
+                "almond", "walnut", "cashew", "pistachio", "hazelnut",
+                "pecan", "macadamia", "pine nut", "chestnut")) {
+            return true;
+        }
+
+        if (hasAllergy(request, "Wheat")
+                && containsAnyIgnoreCase(searchable,
+                "wheat", "flour", "bread", "pasta", "spaghetti", "noodle",
+                "breadcrumbs", "cracker", "wrap", "tortilla")) {
+            return true;
+        }
+
+        if (hasAllergy(request, "Soy")
+                && containsAnyIgnoreCase(searchable,
+                "soy", "soya", "tofu", "tempeh", "miso", "edamame",
+                "soy sauce", "soya sauce")) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private String buildMealSearchableText(TheMealDbMeal meal) {
+        StringBuilder builder = new StringBuilder();
+
+        appendSearchText(builder, meal.getStrMeal());
+        appendSearchText(builder, meal.getStrCategory());
+        appendSearchText(builder, meal.getStrArea());
+        appendSearchText(builder, meal.getStrTags());
+
+        appendSearchText(builder, meal.getStrIngredient1());
+        appendSearchText(builder, meal.getStrIngredient2());
+        appendSearchText(builder, meal.getStrIngredient3());
+        appendSearchText(builder, meal.getStrIngredient4());
+        appendSearchText(builder, meal.getStrIngredient5());
+        appendSearchText(builder, meal.getStrIngredient6());
+        appendSearchText(builder, meal.getStrIngredient7());
+        appendSearchText(builder, meal.getStrIngredient8());
+        appendSearchText(builder, meal.getStrIngredient9());
+        appendSearchText(builder, meal.getStrIngredient10());
+        appendSearchText(builder, meal.getStrIngredient11());
+        appendSearchText(builder, meal.getStrIngredient12());
+        appendSearchText(builder, meal.getStrIngredient13());
+        appendSearchText(builder, meal.getStrIngredient14());
+        appendSearchText(builder, meal.getStrIngredient15());
+        appendSearchText(builder, meal.getStrIngredient16());
+        appendSearchText(builder, meal.getStrIngredient17());
+        appendSearchText(builder, meal.getStrIngredient18());
+        appendSearchText(builder, meal.getStrIngredient19());
+        appendSearchText(builder, meal.getStrIngredient20());
+
+        return builder.toString().toLowerCase();
+    }
+
+    private void appendSearchText(StringBuilder builder, String value) {
+        if (value == null || value.trim().length() == 0) {
+            return;
+        }
+
+        if (builder.length() > 0) {
+            builder.append(' ');
+        }
+
+        builder.append(value.trim());
+    }
+
+    private boolean containsAnyIgnoreCase(String text, String... keywords) {
+        if (text == null || keywords == null) {
+            return false;
+        }
+
+        String lower = text.toLowerCase();
+
+        for (String keyword : keywords) {
+            if (keyword != null && lower.contains(keyword.toLowerCase())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private boolean hasAllergy(MealPlanGenerateRequest request, String allergyName) {
+        if (request == null || request.getAllergies() == null || allergyName == null) {
+            return false;
+        }
+
+        for (String allergy : request.getAllergies()) {
+            if (allergy != null && allergyName.equalsIgnoreCase(allergy.trim())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private boolean hasRestriction(MealPlanGenerateRequest request, String key) {
+        if (request == null || request.getRestrictions() == null || key == null) {
+            return false;
+        }
+
+        Object value = request.getRestrictions().get(key);
+        if (value instanceof Boolean) {
+            return ((Boolean) value).booleanValue();
+        }
+
+        return value != null && "true".equalsIgnoreCase(String.valueOf(value).trim());
     }
 
     public void importAllMeals() throws Exception {

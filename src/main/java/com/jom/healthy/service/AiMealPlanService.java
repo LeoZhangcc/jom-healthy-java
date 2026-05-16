@@ -2,8 +2,11 @@ package com.jom.healthy.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jom.healthy.dto.MealNutritionDto;
 import com.jom.healthy.dto.MealPlanGenerateRequest;
+import com.jom.healthy.entity.TheMealDbMeal;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -17,9 +20,13 @@ import org.springframework.web.client.HttpServerErrorException;
 
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 @Slf4j
@@ -37,6 +44,9 @@ public class AiMealPlanService {
     private final RestTemplate restTemplate = new RestTemplate();
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Autowired
+    private TheMealService theMealService;
 
     public Map<String, Object> generateMealPlan(MealPlanGenerateRequest request) {
         log.info("generateMealPlan start=====request:{}", request);
@@ -188,14 +198,14 @@ public class AiMealPlanService {
          * - 2+ days: delegate to Gemini's generateMealPlan(...) once,
          *   which already supports multi-day single-request output.
          */
-        int requestedDays = normalizeRequestedDays(request);
-        if (requestedDays > 1) {
-            log.info(
-                    "generateMealPlanByGroq rerouted to Gemini for multi-day request=====days:{}",
-                    requestedDays
-            );
-            return generateMealPlan(request);
-        }
+//        int requestedDays = normalizeRequestedDays(request);
+//        if (requestedDays > 1) {
+//            log.info(
+//                    "generateMealPlanByGroq rerouted to Gemini for multi-day request=====days:{}",
+//                    requestedDays
+//            );
+//            return generateMealPlan(request);
+//        }
 
         try {
             if (groqApiKey == null || groqApiKey.trim().length() == 0) {
@@ -204,7 +214,14 @@ public class AiMealPlanService {
 
             log.info("generateMealPlanByGroq =====groqModel:{}", groqModel);
 
-            String prompt = buildPrompt(request);
+            List<TheMealDbMeal> candidateMeals =
+                    theMealService.selectRandomMealCandidatesForAi(request, 30);
+
+            if (candidateMeals == null || candidateMeals.isEmpty()) {
+                throw new RuntimeException("No safe candidate meals were found in themealdb_meals.");
+            }
+
+            String prompt = buildGroqDatabaseMealSelectionPrompt(request, candidateMeals);
 
             Map<String, Object> systemMessage = new HashMap<String, Object>();
             systemMessage.put("role", "system");
@@ -266,8 +283,19 @@ public class AiMealPlanService {
                     response.getStatusCode()
             );
 
-            Map<String, Object> result = parseGroqResponse(response.getBody());
-            enforceMealPlanTargetLimits(result, request);
+            Map<String, Object> selection = parseGroqMealSelectionResponse(response.getBody());
+            Map<String, Object> result = buildDatabaseMealPlanFromGroqSelection(
+                    selection,
+                    candidateMeals,
+                    request
+            );
+
+            ensureMealLanguageFields(result);
+            ensureMealIconFields(result);
+            ensureYoutubeSearchLinks(result);
+            sanitizeMealPlanUrls(result);
+
+            enforceMealPlanTargetLimitsByMacroGroupScaling(result, request);
 
             long costMs = System.currentTimeMillis() - startTime;
             log.info(
@@ -322,6 +350,985 @@ public class AiMealPlanService {
             return fallback;
         }
     }
+
+    /**
+     * Groq 专用 Prompt：
+     * 这里只让 AI 从数据库候选 strMeal 里挑选餐单，
+     * 不让 AI 自己编造完整营养、食材或做法。
+     * 完整食谱数据随后由后端按 strMeal 回查数据库。
+     */
+    private String buildGroqDatabaseMealSelectionPrompt(
+            MealPlanGenerateRequest request,
+            List<TheMealDbMeal> candidateMeals
+    ) {
+        String childName = safeString(request == null ? null : request.getChildName(), "Guest");
+        Integer age = request == null || request.getAge() == null ? 7 : request.getAge();
+        String gender = safeString(request == null ? null : request.getGender(), "boy");
+        Double heightCm = request == null || request.getHeightCm() == null ? 120.0 : request.getHeightCm();
+        Double weightKg = request == null || request.getWeightKg() == null ? 20.0 : request.getWeightKg();
+
+        Double targetCarbs = request == null || request.getTargetCarbs() == null ? 155.0 : request.getTargetCarbs();
+        Double targetProtein = request == null || request.getTargetProtein() == null ? 32.0 : request.getTargetProtein();
+        Double targetFat = request == null || request.getTargetFat() == null ? 28.0 : request.getTargetFat();
+
+        int requestedDays = getRequestedDays(request);
+
+        String allergies = request == null || request.getAllergies() == null
+                ? "[]"
+                : request.getAllergies().toString();
+
+        String restrictions = request == null || request.getRestrictions() == null
+                ? "{}"
+                : request.getRestrictions().toString();
+
+        String mealPreference = request == null ? "" : safeString(request.getMealPreference(), "");
+
+        StringBuilder candidateBuilder = new StringBuilder();
+        for (int i = 0; i < candidateMeals.size(); i++) {
+            TheMealDbMeal meal = candidateMeals.get(i);
+            if (meal == null || meal.getStrMeal() == null || meal.getStrMeal().trim().length() == 0) {
+                continue;
+            }
+
+            if (candidateBuilder.length() > 0) {
+                candidateBuilder.append(" | ");
+            }
+
+            candidateBuilder.append(meal.getStrMeal().trim());
+
+            if (meal.getStrCategory() != null && meal.getStrCategory().trim().length() > 0) {
+                candidateBuilder.append(" [").append(meal.getStrCategory().trim()).append("]");
+            }
+        }
+
+        StringBuilder prompt = new StringBuilder();
+
+        prompt.append("You are selecting meal names for a child meal plan. ");
+        prompt.append("Return exactly one valid minified JSON object only. ");
+        prompt.append("Do not return explanations, markdown, or any text outside JSON. ");
+        prompt.append("You must choose meal names ONLY from the Candidate meals list. ");
+        prompt.append("Copy each chosen strMeal exactly as written. Do not rename or paraphrase it.\n");
+
+        prompt.append("Child profile: ");
+        prompt.append("name=").append(childName).append("; ");
+        prompt.append("age=").append(age).append("; ");
+        prompt.append("gender=").append(gender).append("; ");
+        prompt.append("heightCm=").append(heightCm).append("; ");
+        prompt.append("weightKg=").append(weightKg).append("; ");
+        prompt.append("allergies=").append(allergies).append("; ");
+        prompt.append("restrictions=").append(restrictions).append("; ");
+        prompt.append("mealPreference=").append(mealPreference).append(".\n");
+
+        prompt.append("Daily nutrition targets used only to guide sensible meal selection: ");
+        prompt.append("carbs=").append(targetCarbs).append("g; ");
+        prompt.append("protein=").append(targetProtein).append("g; ");
+        prompt.append("fat=").append(targetFat).append("g. ");
+        prompt.append("The backend will later adjust portions proportionally per whole meal, so you only select suitable meal names.\n");
+
+        prompt.append("Task: choose meals for ").append(requestedDays).append(" day(s). ");
+        prompt.append("Each day must contain breakfast, lunch, dinner, and snack. ");
+        prompt.append("Prefer variety across days and avoid repeating the same meal too often. ");
+        prompt.append("Use the meal's category as a clue, but select only from the candidate list.\n");
+
+        prompt.append("Candidate meals: ").append(candidateBuilder).append("\n");
+
+        if (requestedDays <= 1) {
+            prompt.append("Output format exactly: ");
+            prompt.append("{\"plan\":{\"breakfast\":\"Exact strMeal\",\"lunch\":\"Exact strMeal\",\"dinner\":\"Exact strMeal\",\"snack\":\"Exact strMeal\"}}");
+        } else {
+            prompt.append("Output format exactly: ");
+            prompt.append("{\"plans\":[{\"day\":1,\"plan\":{\"breakfast\":\"Exact strMeal\",\"lunch\":\"Exact strMeal\",\"dinner\":\"Exact strMeal\",\"snack\":\"Exact strMeal\"}}]} ");
+            prompt.append("The plans array must contain exactly ").append(requestedDays).append(" day objects, day values ascending from 1 to ").append(requestedDays).append(".");
+        }
+
+        return prompt.toString();
+    }
+
+    private Map<String, Object> parseGroqMealSelectionResponse(String responseBody) throws Exception {
+        JsonNode root = objectMapper.readTree(responseBody);
+
+        String text = root
+                .path("choices")
+                .path(0)
+                .path("message")
+                .path("content")
+                .asText();
+
+        if (text == null || text.trim().length() == 0) {
+            throw new RuntimeException("Groq returned empty meal-selection text");
+        }
+
+        text = cleanJsonText(text);
+
+        if (!looksLikeCompleteJsonObject(text)) {
+            throw new RuntimeException("Groq returned an incomplete meal-selection JSON object.");
+        }
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> selection = objectMapper.readValue(text, Map.class);
+
+        return selection;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> buildDatabaseMealPlanFromGroqSelection(
+            Map<String, Object> selection,
+            List<TheMealDbMeal> candidateMeals,
+            MealPlanGenerateRequest request
+    ) {
+        int requestedDays = getRequestedDays(request);
+        String[] slots = new String[] {"breakfast", "lunch", "dinner", "snack"};
+
+        if (requestedDays <= 1) {
+            Map<String, Object> selectedPlan = extractGroqSelectedPlan(selection, 0);
+            Map<String, Object> fullPlan = materializeDatabaseDayPlan(
+                    selectedPlan,
+                    candidateMeals,
+                    slots,
+                    0
+            );
+
+            Map<String, Object> result = new HashMap<String, Object>();
+            result.put("plan", fullPlan);
+            return result;
+        }
+
+        List<Map<String, Object>> plans = new ArrayList<Map<String, Object>>();
+
+        for (int dayIndex = 0; dayIndex < requestedDays; dayIndex++) {
+            Map<String, Object> selectedPlan = extractGroqSelectedPlan(selection, dayIndex);
+            Map<String, Object> fullPlan = materializeDatabaseDayPlan(
+                    selectedPlan,
+                    candidateMeals,
+                    slots,
+                    dayIndex
+            );
+
+            Map<String, Object> dayWrapper = new HashMap<String, Object>();
+            dayWrapper.put("day", dayIndex + 1);
+            dayWrapper.put("plan", fullPlan);
+            plans.add(dayWrapper);
+        }
+
+        Map<String, Object> result = new HashMap<String, Object>();
+        result.put("plans", plans);
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> extractGroqSelectedPlan(Map<String, Object> selection, int dayIndex) {
+        if (selection == null) {
+            return new HashMap<String, Object>();
+        }
+
+        Object singlePlanObj = selection.get("plan");
+        if (dayIndex == 0 && singlePlanObj instanceof Map) {
+            return (Map<String, Object>) singlePlanObj;
+        }
+
+        Object plansObj = selection.get("plans");
+        if (!(plansObj instanceof List)) {
+            return new HashMap<String, Object>();
+        }
+
+        List<Object> plans = (List<Object>) plansObj;
+        if (dayIndex < 0 || dayIndex >= plans.size()) {
+            return new HashMap<String, Object>();
+        }
+
+        Object dayObj = plans.get(dayIndex);
+        if (!(dayObj instanceof Map)) {
+            return new HashMap<String, Object>();
+        }
+
+        Map<String, Object> dayMap = (Map<String, Object>) dayObj;
+        Object planObj = dayMap.get("plan");
+
+        if (planObj instanceof Map) {
+            return (Map<String, Object>) planObj;
+        }
+
+        return new HashMap<String, Object>();
+    }
+
+    private Map<String, Object> materializeDatabaseDayPlan(
+            Map<String, Object> selectedPlan,
+            List<TheMealDbMeal> candidateMeals,
+            String[] slots,
+            int dayIndex
+    ) {
+        Map<String, Object> fullPlan = new LinkedHashMap<String, Object>();
+
+        for (int slotIndex = 0; slotIndex < slots.length; slotIndex++) {
+            String slot = slots[slotIndex];
+            String selectedMealName = selectedPlan == null
+                    ? ""
+                    : stringValue(selectedPlan.get(slot), "");
+
+            MealNutritionDto mealDto = findDatabaseMealOrFallbackCandidate(
+                    selectedMealName,
+                    candidateMeals,
+                    dayIndex,
+                    slotIndex
+            );
+
+            if (mealDto == null) {
+                throw new RuntimeException("Unable to load database meal for slot: " + slot);
+            }
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> mealMap = objectMapper.convertValue(mealDto, Map.class);
+            fullPlan.put(slot, mealMap);
+        }
+
+        return fullPlan;
+    }
+
+    private MealNutritionDto findDatabaseMealOrFallbackCandidate(
+            String selectedMealName,
+            List<TheMealDbMeal> candidateMeals,
+            int dayIndex,
+            int slotIndex
+    ) {
+        MealNutritionDto exact = theMealService.findMealNutritionByExactStrMeal(selectedMealName);
+        if (exact != null) {
+            return exact;
+        }
+
+        if (candidateMeals == null || candidateMeals.isEmpty()) {
+            return null;
+        }
+
+        int candidateIndex = Math.abs(dayIndex * 4 + slotIndex) % candidateMeals.size();
+        TheMealDbMeal fallbackCandidate = candidateMeals.get(candidateIndex);
+
+        if (fallbackCandidate == null || fallbackCandidate.getStrMeal() == null) {
+            return null;
+        }
+
+        return theMealService.findMealNutritionByExactStrMeal(fallbackCandidate.getStrMeal());
+    }
+
+    /**
+     * Groq + DB meal plan 专用营养调整逻辑。
+     *
+     * 新逻辑：
+     * 1. 不再按早餐/午餐/晚餐/加餐整体缩放。
+     * 2. 把当天所有食材按“碳水主导 / 蛋白主导 / 脂肪主导”分为 3 组。
+     * 3. 同一组里的所有食材使用同一个缩放比例，避免只改一种食材。
+     * 4. 碳水组、蛋白组、脂肪组可使用不同的缩放比例。
+     * 5. 通过 3×3 线性方程，直接求出让全天 carbs / protein / fat 精确命中目标的 3 个系数。
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> enforceMealPlanTargetLimitsByMacroGroupScaling(
+            Map<String, Object> result,
+            MealPlanGenerateRequest request
+    ) {
+        if (result == null) {
+            return result;
+        }
+
+        List<Map<String, Object>> plans = collectPlanMaps(result);
+
+        for (int dayIndex = 0; dayIndex < plans.size(); dayIndex++) {
+            enforceSingleDayMacroGroupScaling(plans.get(dayIndex), request, dayIndex + 1);
+        }
+
+        return result;
+    }
+
+    private void enforceSingleDayMacroGroupScaling(
+            Map<String, Object> plan,
+            MealPlanGenerateRequest request,
+            int dayNumber
+    ) {
+        if (plan == null) {
+            return;
+        }
+
+        double targetCarbs = normalizeTarget(request == null ? null : request.getTargetCarbs(), 155.0);
+        double targetProtein = normalizeTarget(request == null ? null : request.getTargetProtein(), 32.0);
+        double targetFat = normalizeTarget(request == null ? null : request.getTargetFat(), 28.0);
+
+        String[] mealKeys = new String[] {"breakfast", "lunch", "dinner", "snack"};
+        double[] before = recalculatePlanAndGetTotals(plan, mealKeys);
+
+        /*
+         * matrix[macroRow][groupColumn]
+         * macroRow: 0=carbs, 1=protein, 2=fat
+         * groupColumn: 0=carb-dominant ingredients, 1=protein-dominant ingredients, 2=fat-dominant ingredients
+         */
+        double[][] groupMacroMatrix = collectMacroGroupMatrix(plan, mealKeys);
+
+        double[] targets = new double[] {targetCarbs, targetProtein, targetFat};
+        double[] factors = solveThreeByThree(groupMacroMatrix, targets);
+
+        if (!isUsableMacroGroupFactorSolution(groupMacroMatrix, factors, targets)) {
+            log.warn(
+                    "AI DB meal plan day {} cannot find a positive exact macro-group scaling solution on first attempt. " +
+                            "Before:{}/{}/{} Target:{}/{}/{}. GroupMatrix carbs=[{},{},{}], protein=[{},{},{}], fat=[{},{},{}]. " +
+                            "Trying same-category meal replacements.",
+                    dayNumber,
+                    roundOne(before[0]),
+                    roundOne(before[1]),
+                    roundOne(before[2]),
+                    targetCarbs,
+                    targetProtein,
+                    targetFat,
+                    roundFour(groupMacroMatrix[0][0]),
+                    roundFour(groupMacroMatrix[0][1]),
+                    roundFour(groupMacroMatrix[0][2]),
+                    roundFour(groupMacroMatrix[1][0]),
+                    roundFour(groupMacroMatrix[1][1]),
+                    roundFour(groupMacroMatrix[1][2]),
+                    roundFour(groupMacroMatrix[2][0]),
+                    roundFour(groupMacroMatrix[2][1]),
+                    roundFour(groupMacroMatrix[2][2])
+            );
+
+            MacroGroupReplacementSolution replacementSolution =
+                    findSameCategoryReplacementSolution(
+                            plan,
+                            mealKeys,
+                            request,
+                            targets,
+                            dayNumber
+                    );
+
+            if (replacementSolution == null) {
+                log.warn(
+                        "AI DB meal plan day {} still cannot find an exact macro-group solution after same-category replacements. " +
+                                "Keeping the original selected meals unchanged.",
+                        dayNumber
+                );
+                return;
+            }
+
+            replacePlanMealsWithSolution(plan, mealKeys, replacementSolution);
+            groupMacroMatrix = collectMacroGroupMatrix(plan, mealKeys);
+            factors = replacementSolution.factors;
+
+            log.info(
+                    "AI DB meal plan day {} found same-category replacement solution. " +
+                            "Replacements:{}, Factors carb/protein/fat={}/{}/{}.",
+                    dayNumber,
+                    replacementSolution.replacementCount,
+                    roundFour(factors[0]),
+                    roundFour(factors[1]),
+                    roundFour(factors[2])
+            );
+        }
+
+        scaleIngredientsByMacroGroups(plan, mealKeys, factors);
+
+        double[] after = recalculatePlanAndGetTotals(plan, mealKeys);
+
+        log.info(
+                "AI DB meal plan day {} macro-group factors carb/protein/fat={}/{}/{}. " +
+                        "Before:{}/{}/{} Target:{}/{}/{} After:{}/{}/{} Error:{}/{}/{}",
+                dayNumber,
+                roundFour(factors[0]),
+                roundFour(factors[1]),
+                roundFour(factors[2]),
+                roundOne(before[0]),
+                roundOne(before[1]),
+                roundOne(before[2]),
+                targetCarbs,
+                targetProtein,
+                targetFat,
+                roundOne(after[0]),
+                roundOne(after[1]),
+                roundOne(after[2]),
+                roundFour(after[0] - targetCarbs),
+                roundFour(after[1] - targetProtein),
+                roundFour(after[2] - targetFat)
+        );
+    }
+
+    @SuppressWarnings("unchecked")
+    private double[][] collectMacroGroupMatrix(Map<String, Object> plan, String[] mealKeys) {
+        double[][] matrix = new double[3][3];
+
+        for (String mealKey : mealKeys) {
+            Object mealObj = plan.get(mealKey);
+
+            if (!(mealObj instanceof Map)) {
+                continue;
+            }
+
+            Map<String, Object> meal = (Map<String, Object>) mealObj;
+            Object ingredientsObj = meal.get("ingredients");
+
+            if (!(ingredientsObj instanceof List)) {
+                continue;
+            }
+
+            List<Object> ingredients = (List<Object>) ingredientsObj;
+
+            for (Object ingredientObj : ingredients) {
+                if (!(ingredientObj instanceof Map)) {
+                    continue;
+                }
+
+                Map<String, Object> ingredient = (Map<String, Object>) ingredientObj;
+
+                double carbs = numberValue(ingredient.get("carbohydrateG"));
+                double protein = numberValue(ingredient.get("proteinG"));
+                double fat = numberValue(ingredient.get("fatG"));
+
+                if (carbs <= 0.0 && protein <= 0.0 && fat <= 0.0) {
+                    continue;
+                }
+
+                int group = classifyIngredientMacroGroup(ingredient, carbs, protein, fat);
+
+                matrix[0][group] += carbs;
+                matrix[1][group] += protein;
+                matrix[2][group] += fat;
+            }
+        }
+
+        return matrix;
+    }
+
+    /**
+     * 宏量营养分组：
+     * 0 = 碳水组
+     * 1 = 蛋白组
+     * 2 = 脂肪组
+     *
+     * 优先看明显的营养主导；
+     * 如果是混合型食材，再用 foodGroup / 食材名兜底；
+     * 最后按数值最大项分类。
+     */
+    private int classifyIngredientMacroGroup(
+            Map<String, Object> ingredient,
+            double carbs,
+            double protein,
+            double fat
+    ) {
+        double max = Math.max(carbs, Math.max(protein, fat));
+
+        if (max > 0.0) {
+            if (carbs >= protein * 1.15 && carbs >= fat * 1.15) {
+                return 0;
+            }
+
+            if (protein >= carbs * 1.15 && protein >= fat * 1.15) {
+                return 1;
+            }
+
+            if (fat >= carbs * 1.15 && fat >= protein * 1.15) {
+                return 2;
+            }
+        }
+
+        String text = (
+                stringValue(ingredient.get("foodGroup"), "") + " "
+                        + stringValue(ingredient.get("foodNameEn"), "") + " "
+                        + stringValue(ingredient.get("ingredientName"), "")
+        ).toLowerCase();
+
+        if (containsAny(
+                text,
+                "oil", "fat", "butter", "cream", "coconut milk", "mayonnaise",
+                "peanut butter", "nut", "almond", "cashew", "walnut", "avocado"
+        )) {
+            return 2;
+        }
+
+        if (containsAny(
+                text,
+                "protein", "meat", "chicken", "beef", "pork", "lamb", "fish",
+                "salmon", "tuna", "seafood", "egg", "tofu", "tempeh", "bean",
+                "lentil", "prawn", "shrimp", "yogurt", "milk"
+        )) {
+            return 1;
+        }
+
+        if (containsAny(
+                text,
+                "carb", "grain", "rice", "bread", "noodle", "pasta", "spaghetti",
+                "oat", "flour", "cereal", "potato", "sweet potato", "corn",
+                "banana", "apple", "fruit", "sugar", "syrup"
+        )) {
+            return 0;
+        }
+
+        if (fat >= protein && fat >= carbs) {
+            return 2;
+        }
+
+        if (protein >= carbs && protein >= fat) {
+            return 1;
+        }
+
+        return 0;
+    }
+
+    private boolean isUsableMacroGroupFactorSolution(
+            double[][] matrix,
+            double[] factors,
+            double[] targets
+    ) {
+        if (matrix == null || matrix.length != 3 || factors == null || factors.length != 3) {
+            return false;
+        }
+
+        /*
+         * 允许较宽范围，避免过早判定失败。
+         * 因为数据库食谱已有 portionFactor，后续这里更像是“按营养组再校正一次”。
+         */
+        final double minFactor = 0.01;
+        final double maxFactor = 20.0;
+
+        for (double factor : factors) {
+            if (Double.isNaN(factor)
+                    || Double.isInfinite(factor)
+                    || factor < minFactor
+                    || factor > maxFactor) {
+                return false;
+            }
+        }
+
+        double[] projected = multiplyMacroGroupsByFactors(matrix, factors);
+
+        return withinExactMacroTolerance(projected, targets, 0.05);
+    }
+
+    private double[] multiplyMacroGroupsByFactors(double[][] matrix, double[] factors) {
+        double[] totals = new double[] {0.0, 0.0, 0.0};
+
+        for (int macroIndex = 0; macroIndex < 3; macroIndex++) {
+            totals[macroIndex] =
+                    matrix[macroIndex][0] * factors[0]
+                            + matrix[macroIndex][1] * factors[1]
+                            + matrix[macroIndex][2] * factors[2];
+        }
+
+        return totals;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void scaleIngredientsByMacroGroups(
+            Map<String, Object> plan,
+            String[] mealKeys,
+            double[] factors
+    ) {
+        for (String mealKey : mealKeys) {
+            Object mealObj = plan.get(mealKey);
+
+            if (!(mealObj instanceof Map)) {
+                continue;
+            }
+
+            Map<String, Object> meal = (Map<String, Object>) mealObj;
+            Object ingredientsObj = meal.get("ingredients");
+
+            if (!(ingredientsObj instanceof List)) {
+                continue;
+            }
+
+            List<Object> ingredients = (List<Object>) ingredientsObj;
+
+            for (Object ingredientObj : ingredients) {
+                if (!(ingredientObj instanceof Map)) {
+                    continue;
+                }
+
+                Map<String, Object> ingredient = (Map<String, Object>) ingredientObj;
+
+                double carbs = numberValue(ingredient.get("carbohydrateG"));
+                double protein = numberValue(ingredient.get("proteinG"));
+                double fat = numberValue(ingredient.get("fatG"));
+
+                if (carbs <= 0.0 && protein <= 0.0 && fat <= 0.0) {
+                    continue;
+                }
+
+                int group = classifyIngredientMacroGroup(ingredient, carbs, protein, fat);
+                double factor = factors[group];
+
+                scaleSingleIngredientNutrition(ingredient, factor);
+            }
+
+            recalculateMealTotalsFromIngredients(meal);
+        }
+    }
+
+    private void scaleSingleIngredientNutrition(Map<String, Object> ingredient, double factor) {
+        double grams = numberValue(ingredient.get("gramsEstimated"));
+        double energy = numberValue(ingredient.get("energyKcal"));
+        double protein = numberValue(ingredient.get("proteinG"));
+        double carbs = numberValue(ingredient.get("carbohydrateG"));
+        double fat = numberValue(ingredient.get("fatG"));
+
+        double nextGrams = roundTwo(grams * factor);
+
+        ingredient.put("gramsEstimated", nextGrams);
+        ingredient.put("measure", formatScaledGramMeasure(nextGrams));
+        ingredient.put("energyKcal", roundFour(energy * factor));
+        ingredient.put("proteinG", roundFour(protein * factor));
+        ingredient.put("carbohydrateG", roundFour(carbs * factor));
+        ingredient.put("fatG", roundFour(fat * factor));
+    }
+
+    /**
+     * 当当前 4 餐的宏量营养组合无法被 carb/protein/fat 三组缩放精确求解时：
+     * 1. 每个 slot 只找相同 strCategory 的数据库食谱；
+     * 2. 组合尝试“原食谱 + 同类别替代食谱”；
+     * 3. 优先选择替换数量更少、缩放系数更接近 1 的解。
+     */
+    @SuppressWarnings("unchecked")
+    private MacroGroupReplacementSolution findSameCategoryReplacementSolution(
+            Map<String, Object> originalPlan,
+            String[] mealKeys,
+            MealPlanGenerateRequest request,
+            double[] targets,
+            int dayNumber
+    ) {
+        if (originalPlan == null || mealKeys == null || mealKeys.length != 4) {
+            return null;
+        }
+
+        List<String> dayMealNames = collectCurrentPlanMealNames(originalPlan, mealKeys);
+        List<List<Map<String, Object>>> slotOptions = new ArrayList<List<Map<String, Object>>>();
+
+        final int alternativesPerSlot = 5;
+
+        for (String mealKey : mealKeys) {
+            Object mealObj = originalPlan.get(mealKey);
+
+            if (!(mealObj instanceof Map)) {
+                return null;
+            }
+
+            Map<String, Object> currentMeal = deepCopyMealMap((Map<String, Object>) mealObj);
+            List<Map<String, Object>> options = new ArrayList<Map<String, Object>>();
+            options.add(currentMeal);
+
+            String category = stringValue(currentMeal.get("strCategory"), "");
+            List<String> excludedNames = new ArrayList<String>(dayMealNames);
+
+            List<MealNutritionDto> alternatives =
+                    theMealService.findSameCategoryAlternativeMealsForAi(
+                            category,
+                            request,
+                            excludedNames,
+                            alternativesPerSlot
+                    );
+
+            if (alternatives != null) {
+                for (MealNutritionDto alternative : alternatives) {
+                    if (alternative == null) {
+                        continue;
+                    }
+
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> alternativeMap =
+                            objectMapper.convertValue(alternative, Map.class);
+
+                    String alternativeName = stringValue(alternativeMap.get("strMeal"), "");
+                    if (alternativeName.trim().length() == 0) {
+                        continue;
+                    }
+
+                    options.add(alternativeMap);
+                    excludedNames.add(alternativeName);
+                }
+            }
+
+            slotOptions.add(options);
+        }
+
+        MacroGroupReplacementSolution[] bestHolder =
+                new MacroGroupReplacementSolution[] {null};
+
+        List<Map<String, Object>> selected = new ArrayList<Map<String, Object>>();
+        searchSameCategoryReplacementCombinations(
+                slotOptions,
+                mealKeys,
+                targets,
+                0,
+                selected,
+                0,
+                bestHolder
+        );
+
+        MacroGroupReplacementSolution best = bestHolder[0];
+
+        if (best == null) {
+            log.warn(
+                    "AI DB meal plan day {} replacement search did not find a valid same-category combination. Options per slot={}/{}/{}/{}.",
+                    dayNumber,
+                    slotOptions.get(0).size(),
+                    slotOptions.get(1).size(),
+                    slotOptions.get(2).size(),
+                    slotOptions.get(3).size()
+            );
+        }
+
+        return best;
+    }
+
+    private void searchSameCategoryReplacementCombinations(
+            List<List<Map<String, Object>>> slotOptions,
+            String[] mealKeys,
+            double[] targets,
+            int depth,
+            List<Map<String, Object>> selected,
+            int replacementCount,
+            MacroGroupReplacementSolution[] bestHolder
+    ) {
+        if (slotOptions == null || mealKeys == null || targets == null) {
+            return;
+        }
+
+        if (depth >= mealKeys.length) {
+            Map<String, Object> candidatePlan = new HashMap<String, Object>();
+
+            for (int i = 0; i < mealKeys.length; i++) {
+                candidatePlan.put(mealKeys[i], deepCopyMealMap(selected.get(i)));
+            }
+
+            double[][] matrix = collectMacroGroupMatrix(candidatePlan, mealKeys);
+            double[] factors = solveThreeByThree(matrix, targets);
+
+            if (!isUsableMacroGroupFactorSolution(matrix, factors, targets)) {
+                return;
+            }
+
+            double score = replacementCount * 1000.0 + macroGroupFactorDistanceFromOne(factors);
+
+            if (bestHolder[0] == null || score < bestHolder[0].score) {
+                bestHolder[0] = new MacroGroupReplacementSolution(
+                        cloneMealSelection(selected),
+                        factors,
+                        replacementCount,
+                        score
+                );
+            }
+
+            return;
+        }
+
+        List<Map<String, Object>> options = slotOptions.get(depth);
+
+        if (options == null || options.isEmpty()) {
+            return;
+        }
+
+        for (int optionIndex = 0; optionIndex < options.size(); optionIndex++) {
+            /*
+             * 选项 0 一定是当前原食谱；后续才是同类别替代食谱。
+             */
+            int nextReplacementCount = replacementCount + (optionIndex == 0 ? 0 : 1);
+
+            if (bestHolder[0] != null && nextReplacementCount > bestHolder[0].replacementCount) {
+                continue;
+            }
+
+            selected.add(options.get(optionIndex));
+
+            searchSameCategoryReplacementCombinations(
+                    slotOptions,
+                    mealKeys,
+                    targets,
+                    depth + 1,
+                    selected,
+                    nextReplacementCount,
+                    bestHolder
+            );
+
+            selected.remove(selected.size() - 1);
+        }
+    }
+
+    private List<Map<String, Object>> cloneMealSelection(List<Map<String, Object>> meals) {
+        List<Map<String, Object>> clones = new ArrayList<Map<String, Object>>();
+
+        if (meals == null) {
+            return clones;
+        }
+
+        for (Map<String, Object> meal : meals) {
+            clones.add(deepCopyMealMap(meal));
+        }
+
+        return clones;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> deepCopyMealMap(Map<String, Object> meal) {
+        if (meal == null) {
+            return new HashMap<String, Object>();
+        }
+
+        return objectMapper.convertValue(meal, Map.class);
+    }
+
+    private List<String> collectCurrentPlanMealNames(Map<String, Object> plan, String[] mealKeys) {
+        List<String> names = new ArrayList<String>();
+
+        if (plan == null || mealKeys == null) {
+            return names;
+        }
+
+        for (String mealKey : mealKeys) {
+            Object mealObj = plan.get(mealKey);
+
+            if (!(mealObj instanceof Map)) {
+                continue;
+            }
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> meal = (Map<String, Object>) mealObj;
+            String mealName = stringValue(meal.get("strMeal"), "");
+
+            if (mealName.trim().length() > 0) {
+                names.add(mealName.trim());
+            }
+        }
+
+        return names;
+    }
+
+    private void replacePlanMealsWithSolution(
+            Map<String, Object> plan,
+            String[] mealKeys,
+            MacroGroupReplacementSolution solution
+    ) {
+        if (plan == null || mealKeys == null || solution == null || solution.meals == null) {
+            return;
+        }
+
+        for (int i = 0; i < mealKeys.length && i < solution.meals.size(); i++) {
+            plan.put(mealKeys[i], deepCopyMealMap(solution.meals.get(i)));
+        }
+    }
+
+    private double macroGroupFactorDistanceFromOne(double[] factors) {
+        if (factors == null) {
+            return Double.MAX_VALUE;
+        }
+
+        double score = 0.0;
+
+        for (double factor : factors) {
+            double diff = factor - 1.0;
+            score += diff * diff;
+        }
+
+        return score;
+    }
+
+    private static class MacroGroupReplacementSolution {
+        private final List<Map<String, Object>> meals;
+        private final double[] factors;
+        private final int replacementCount;
+        private final double score;
+
+        private MacroGroupReplacementSolution(
+                List<Map<String, Object>> meals,
+                double[] factors,
+                int replacementCount,
+                double score
+        ) {
+            this.meals = meals;
+            this.factors = factors;
+            this.replacementCount = replacementCount;
+            this.score = score;
+        }
+    }
+
+    private double[] solveThreeByThree(double[][] matrix, double[] vector) {
+        if (matrix == null || vector == null || matrix.length != 3 || vector.length != 3) {
+            return null;
+        }
+
+        double[][] a = new double[3][4];
+
+        for (int row = 0; row < 3; row++) {
+            if (matrix[row] == null || matrix[row].length != 3) {
+                return null;
+            }
+
+            a[row][0] = matrix[row][0];
+            a[row][1] = matrix[row][1];
+            a[row][2] = matrix[row][2];
+            a[row][3] = vector[row];
+        }
+
+        for (int col = 0; col < 3; col++) {
+            int pivot = col;
+
+            for (int row = col + 1; row < 3; row++) {
+                if (Math.abs(a[row][col]) > Math.abs(a[pivot][col])) {
+                    pivot = row;
+                }
+            }
+
+            if (Math.abs(a[pivot][col]) < 1e-9) {
+                return null;
+            }
+
+            if (pivot != col) {
+                double[] temp = a[pivot];
+                a[pivot] = a[col];
+                a[col] = temp;
+            }
+
+            double divisor = a[col][col];
+
+            for (int k = col; k < 4; k++) {
+                a[col][k] = a[col][k] / divisor;
+            }
+
+            for (int row = 0; row < 3; row++) {
+                if (row == col) {
+                    continue;
+                }
+
+                double eliminationFactor = a[row][col];
+
+                for (int k = col; k < 4; k++) {
+                    a[row][k] = a[row][k] - eliminationFactor * a[col][k];
+                }
+            }
+        }
+
+        return new double[] {a[0][3], a[1][3], a[2][3]};
+    }
+
+    private boolean withinExactMacroTolerance(double[] actual, double[] targets, double tolerance) {
+        if (actual == null || targets == null || actual.length < 3 || targets.length < 3) {
+            return false;
+        }
+
+        return Math.abs(actual[0] - targets[0]) <= tolerance
+                && Math.abs(actual[1] - targets[1]) <= tolerance
+                && Math.abs(actual[2] - targets[2]) <= tolerance;
+    }
+
+    private String formatScaledGramMeasure(double grams) {
+        double rounded = roundTwo(Math.max(grams, 0.0));
+
+        if (Math.abs(rounded - Math.round(rounded)) < 0.0001) {
+            return ((long) Math.round(rounded)) + "g";
+        }
+
+        return rounded + "g";
+    }
+
+    private double roundTwo(double value) {
+        return Math.round(value * 100.0) / 100.0;
+    }
+
+    private double roundFour(double value) {
+        return Math.round(value * 10000.0) / 10000.0;
+    }
+
+
     private String buildPrompt(MealPlanGenerateRequest request) {
         String childName = safeString(request.getChildName(), "Guest");
         Integer age = request.getAge() == null ? 7 : request.getAge();
