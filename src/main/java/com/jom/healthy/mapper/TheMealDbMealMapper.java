@@ -18,6 +18,8 @@ public interface TheMealDbMealMapper extends BaseMapper<TheMealDbMeal> {
                     "m.id AS mealDbId, " +
                     "m.id_meal AS idMeal, " +
                     "m.str_meal AS strMeal, " +
+                    "m.str_meal_cn AS strMealCn, " +
+                    "m.str_meal_ms AS strMealMs, " +
                     "m.str_meal_alternate AS strMealAlternate, " +
 
                     "m.str_category AS strCategory, " +
@@ -120,6 +122,52 @@ public interface TheMealDbMealMapper extends BaseMapper<TheMealDbMeal> {
                     "ORDER BY m.str_meal ASC, i.ingredient_order ASC"
     )
     List<MealNutritionRowDto> searchMealNutritionByPrefix(@Param("keyword") String keyword);
+
+
+    /**
+     * 查询需要翻译 str_meal 的 meal
+     * 一次最多由 Service 限制为 100 条
+     */
+    @Select(
+            "SELECT " +
+                    "id, " +
+                    "str_meal AS strMeal " +
+                    "FROM themealdb_meals " +
+                    "WHERE id > #{id} " +
+                    "AND str_meal IS NOT NULL " +
+                    "AND str_meal <> '' " +
+                    "AND ( " +
+                    "   str_meal_cn IS NULL OR str_meal_cn = '' " +
+                    "   OR str_meal_ms IS NULL OR str_meal_ms = '' " +
+                    ") " +
+                    "ORDER BY id ASC " +
+                    "LIMIT #{size}"
+    )
+    List<TheMealDbMeal> selectMealsNeedMealNameTranslation(
+            @Param("id") Long id,
+            @Param("size") Integer size
+    );
+
+
+    /**
+     * 更新 str_meal 的中文和马来文翻译
+     * 只填空，不覆盖已有值
+     */
+    @Update(
+            "UPDATE themealdb_meals SET " +
+
+                    "str_meal_cn = CASE " +
+                    "   WHEN str_meal_cn IS NULL OR str_meal_cn = '' " +
+                    "   THEN #{strMealCn} ELSE str_meal_cn END, " +
+
+                    "str_meal_ms = CASE " +
+                    "   WHEN str_meal_ms IS NULL OR str_meal_ms = '' " +
+                    "   THEN #{strMealMs} ELSE str_meal_ms END, " +
+
+                    "updated_at = NOW() " +
+                    "WHERE id = #{id}"
+    )
+    int updateMealNameTranslationFields(TheMealDbMeal meal);
 
 
     /**

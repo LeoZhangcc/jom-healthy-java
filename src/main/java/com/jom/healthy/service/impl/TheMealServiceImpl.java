@@ -125,6 +125,8 @@ public class TheMealServiceImpl extends ServiceImpl<TheMealDbMealMapper, TheMeal
         dto.setIdMeal(row.getIdMeal());
 
         dto.setStrMeal(row.getStrMeal());
+        dto.setStrMealCn(row.getStrMealCn());
+        dto.setStrMealMs(row.getStrMealMs());
         dto.setStrMealAlternate(row.getStrMealAlternate());
         dto.setStrCategory(row.getStrCategory());
         dto.setStrCategoryCn(row.getStrCategoryCn());

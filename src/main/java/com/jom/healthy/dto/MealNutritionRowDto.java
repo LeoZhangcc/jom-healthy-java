@@ -12,6 +12,8 @@ public class MealNutritionRowDto {
     private String idMeal;
 
     private String strMeal;
+    private String strMealCn;
+    private String strMealMs;
     private String strMealAlternate;
 
     private String strCategory;
