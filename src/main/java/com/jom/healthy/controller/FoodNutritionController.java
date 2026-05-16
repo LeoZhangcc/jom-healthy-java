@@ -33,6 +33,7 @@ public class FoodNutritionController {
     /**
      * https://www.who.int/tools/growth-reference-data-for-5to19-years/indicators/bmi-for-age 参考文献
      * https://odphp.health.gov/sites/default/files/2019-09/Appendix-E3-1-Table-A4.pdf 碳水蛋白质脂肪
+     * RNI 2017
      */
     @ResponseBody
     @ApiOperation("获取小孩所需要的营养")
